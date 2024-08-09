@@ -41,10 +41,15 @@ on:
         description: 'Run check-mock-gen'
         type: boolean
         default: false
+      run-build:
+        description: 'Run build'
+        type: boolean
+        default: false
 
 jobs:
   build:
     runs-on: ubuntu-22.04
+    if: ${{ inputs.run-build }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4

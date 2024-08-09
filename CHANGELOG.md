@@ -1,5 +1,9 @@
 # CHANGELOG
 
+## 0.3.2
+
+- reusable_go_lint_test: Allow build job to be optional
+
 ## 0.3.1
 
 - reusable_go_lint_test: Install dependencies on all steps
