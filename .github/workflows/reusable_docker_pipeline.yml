@@ -114,7 +114,6 @@ jobs:
           platforms: ${{ matrix.platform }}
           outputs: |
             type=image,name=${{ vars.DOCKERHUB_REGISTRY_ID }}/${{ needs.prepare-metadata.outputs.image-name }},push-by-digest=true,push=${{ inputs.publish }}
-            type=image,name=${{ vars.AWS_ECR_REGISTRY_ID }}/${{ needs.prepare-metadata.outputs.image-name }},push-by-digest=true,push=${{ inputs.publish }}
           secrets: ${{ steps.set-build-secrets.outputs.SECRETS }}
           context: ${{ inputs.dockerContext }}
           file: ${{ inputs.dockerfile }}
