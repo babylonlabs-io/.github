@@ -194,7 +194,7 @@ jobs:
       - name: Create manifest list and push
         working-directory: /tmp/digests
         run: |
-          tags=$(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "${{ steps.meta.outputs.json }}")
+          tags=$(jq -cr '.tags | map("-t " + .) | join(" ")'  <<< "$DOCKER_METADATA_OUTPUT_JSON")
           digests=""
           for digest_file in /tmp/digests/dockerhub/*; do
             digest=$(basename "$digest_file")
@@ -242,7 +242,7 @@ jobs:
       - name: Create manifest list and push
         working-directory: /tmp/digests
         run: |
-          tags=$(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "${{ steps.meta.outputs.json }}")
+          tags=$(jq -cr '.tags | map("-t " + .) | join(" ")'  <<< "$DOCKER_METADATA_OUTPUT_JSON")
           digests=""
           for digest_file in /tmp/digests/ecr/*; do
             digest=$(basename "$digest_file")
