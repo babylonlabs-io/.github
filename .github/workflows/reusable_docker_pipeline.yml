@@ -114,7 +114,7 @@ jobs:
           platforms: ${{ matrix.platform }}
           context: ${{ inputs.dockerContext }}
           file: ${{ inputs.dockerfile }}
-          tags: ${{ vars.DOCKERHUB_REGISTRY_ID }}/${{ needs.prepare-metadata.outputs.image-name }}:${{ matrix.platform }}
+          outputs: type=image,name=${{ vars.DOCKERHUB_REGISTRY_ID }}/${{ needs.prepare-metadata.outputs.image-name }},push-by-digest=true,push=${{ inputs.publish }}
           push: ${{ inputs.publish }}
 
       - name: Build and push to ECR
@@ -124,7 +124,7 @@ jobs:
           platforms: ${{ matrix.platform }}
           context: ${{ inputs.dockerContext }}
           file: ${{ inputs.dockerfile }}
-          tags: ${{ vars.AWS_ECR_REGISTRY_ID }}/${{ needs.prepare-metadata.outputs.image-name }}:${{ matrix.platform }}
+          outputs: type=image,name=${{ vars.AWS_ECR_REGISTRY_ID }}/${{ needs.prepare-metadata.outputs.image-name }},push-by-digest=true,push=${{ inputs.publish }}
           push: ${{ inputs.publish }}
       
       - name: Export digest Docker Hub
