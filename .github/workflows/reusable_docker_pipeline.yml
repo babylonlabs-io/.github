@@ -134,22 +134,12 @@ jobs:
           path: /tmp/digests/*
           if-no-files-found: error
           retention-days: 1
-  merge:
+  merge_dockerhub:
     runs-on: ubuntu-latest
     if: inputs.publish
     needs:
       - docker_build
       - prepare-metadata
-    strategy:
-      matrix:
-        registry_info:
-          - registry_id: ${{ vars.DOCKERHUB_REGISTRY_ID }}
-            username: ${{ secrets.DOCKERHUB_USERNAME }}
-            password: ${{ secrets.DOCKERHUB_TOKEN }}
-          - registry_id: ${{ vars.AWS_ECR_REGISTRY_ID }}
-            username: ${{ secrets.AWS_ACCESS_KEY_ID }}
-            password: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-
     steps:
       - name: Download digests
         uses: actions/download-artifact@v4
@@ -157,36 +147,133 @@ jobs:
           path: /tmp/digests
           pattern: digests-*
           merge-multiple: true
-
+      
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
-
+      
       - name: Docker meta
         id: meta
         uses: docker/metadata-action@v5
         with:
           images: |
-            ${{ matrix.registry_info.registry_id }}/${{ needs.prepare-metadata.outputs.image-name }}
+            ${{ vars.DOCKERHUB_REGISTRY_ID }}/${{ needs.prepare-metadata.outputs.image-name }}
+            ${{ vars.AWS_ECR_REGISTRY_ID }}/${{ needs.prepare-metadata.outputs.image-name }} 
           tags: |
             type=sha,enable=true,priority=100,prefix=,suffix=,format=long
             type=ref,enable=true,priority=200,prefix=,suffix=,event=tag
-
-      - name: Login to Registry
+      
+      - name: Login to Docker Hub
         uses: docker/login-action@v3
         with:
-          registry: ${{ matrix.registry_info.registry_id }}
-          username: ${{ matrix.registry_info.username }}
-          password: ${{ matrix.registry_info.password }}
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Create manifest list and push to ${{ matrix.registry_info.registry_id }}
+      - name: Login to ECR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ vars.AWS_ECR_REGISTRY_ID }}
+          username: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          password: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      
+      - name: Create manifest list and push
         working-directory: /tmp/digests
         run: |
-          tags=$(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON")
-          echo "Tags for ${{ matrix.registry_info.registry_id }}: $tags"
-          digests=$(printf "${{ matrix.registry_info.registry_id }}/${{ needs.prepare-metadata.outputs.image-name }}@sha256:%s " $(ls /tmp/digests))
-          echo "Digests: $digests"
-          docker buildx imagetools create $tags $digests
-
-      - name: Inspect image in ${{ matrix.registry_info.registry_id }}
+          tags=$(jq -cr '.tags | map("-t " + .) | join(" ")'  <<< "$DOCKER_METADATA_OUTPUT_JSON")
+          echo $tags
+          dockerhub_digests=$(printf "${{ vars.DOCKERHUB_REGISTRY_ID }}/${{ needs.prepare-metadata.outputs.image-name }}@sha256:%s " $(ls /tmp/digests))
+          ecr_digests=$(printf "${{ vars.AWS_ECR_REGISTRY_ID }}/${{ needs.prepare-metadata.outputs.image-name }}@sha256:%s " $(ls /tmp/digests))
+          echo $digests
+          docker buildx imagetools create $tags $dockerhub_digests
+          docker buildx imagetools create $tags $ecr_digests
+          
+      - name: Inspect image
         run: |
-          docker buildx imagetools inspect ${{ matrix.registry_info.registry_id }}/${{ needs.prepare-metadata.outputs.image-name }}:${{ steps.meta.outputs.version }}
+          docker buildx imagetools inspect ${{ vars.DOCKERHUB_REGISTRY_ID }}/${{ needs.prepare-metadata.outputs.image-name }}:${{ steps.meta.outputs.version }}
+  merge_dockerhub:
+    runs-on: ubuntu-latest
+    if: inputs.publish
+    needs:
+      - docker_build
+      - prepare-metadata
+    steps:
+      - name: Download digests
+        uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: digests-*
+          merge-multiple: true
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: |
+            ${{ vars.DOCKERHUB_REGISTRY_ID }}/${{ needs.prepare-metadata.outputs.image-name }}
+          ags: |
+            type=sha,enable=true,priority=100,prefix=,suffix=,format=long
+            type=ref,enable=true,priority=200,prefix=,suffix=,event=tag
+      
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      
+      - name: Create manifest list and push
+        working-directory: /tmp/digests
+        run: |
+          tags=$(jq -cr '.tags | map("-t " + .) | join(" ")'  <<< "$DOCKER_METADATA_OUTPUT_JSON")
+          digests=$(printf "${{ vars.DOCKERHUB_REGISTRY_ID }}/${{ needs.prepare-metadata.outputs.image-name }}@sha256:%s " $(ls /tmp/digests))
+          docker buildx imagetools create $tags $digests
+          
+      - name: Inspect image
+        run: |
+          docker buildx imagetools inspect ${{ vars.DOCKERHUB_REGISTRY_ID }}/${{ needs.prepare-metadata.outputs.image-name }}:${{ steps.meta.outputs.version }}
+
+  merge_ecr:
+    runs-on: ubuntu-latest
+    if: inputs.publish
+    needs:
+      - docker_build
+      - prepare-metadata
+    steps:
+      - name: Download digests
+        uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: digests-*
+          merge-multiple: true
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: |
+            ${{ vars.AWS_ECR_REGISTRY_ID }}/${{ needs.prepare-metadata.outputs.image-name }} 
+          tags: |
+            type=sha,enable=true,priority=100,prefix=,suffix=,format=long
+            type=ref,enable=true,priority=200,prefix=,suffix=,event=tag
+      
+      - name: Login to ECR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ vars.AWS_ECR_REGISTRY_ID }}
+          username: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          password: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      
+      - name: Create manifest list and push
+        working-directory: /tmp/digests
+        run: |
+          tags=$(jq -cr '.tags | map("-t " + .) | join(" ")'  <<< "$DOCKER_METADATA_OUTPUT_JSON")
+          digests=$(printf "${{ vars.AWS_ECR_REGISTRY_ID }}/${{ needs.prepare-metadata.outputs.image-name }}@sha256:%s " $(ls /tmp/digests))
+          docker buildx imagetools create $tags $digests
+          
+      - name: Inspect image
+        run: |
+          docker buildx imagetools inspect ${{ vars.AWS_ECR_REGISTRY_ID }}/${{ needs.prepare-metadata.outputs.image-name }}:${{ steps.meta.outputs.version }}
