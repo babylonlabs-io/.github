@@ -210,8 +210,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: |
-            ${{ vars.DOCKERHUB_REGISTRY_ID }}/${{ needs.prepare-metadata.outputs.image-name }}
+          images: ${{ vars.DOCKERHUB_REGISTRY_ID }}/${{ needs.prepare-metadata.outputs.image-name }}
           ags: |
             type=sha,enable=true,priority=100,prefix=,suffix=,format=long
             type=ref,enable=true,priority=200,prefix=,suffix=,event=tag
@@ -254,8 +253,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: |
-            ${{ vars.AWS_ECR_REGISTRY_ID }}/${{ needs.prepare-metadata.outputs.image-name }} 
+          images: ${{ vars.AWS_ECR_REGISTRY_ID }}/${{ needs.prepare-metadata.outputs.image-name }} 
           tags: |
             type=sha,enable=true,priority=100,prefix=,suffix=,format=long
             type=ref,enable=true,priority=200,prefix=,suffix=,event=tag
