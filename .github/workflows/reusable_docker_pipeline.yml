@@ -35,7 +35,7 @@ jobs:
   prepare-metadata:
     runs-on: ubuntu-22.04
     outputs:
-      build-image: ${{ steps.set_image_name.outputs.IMAGE_NAME }}
+      image-name: ${{ steps.set_image_name.outputs.IMAGE_NAME }}
     steps:
       - name: Determine image name
         id: set_image_name
