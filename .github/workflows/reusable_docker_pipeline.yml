@@ -48,8 +48,6 @@ jobs:
   docker_build:
     runs-on: ${{ matrix.runner }}
     needs: prepare-metadata
-    env:
-     IMAGE_NAME: ${{ needs.prepare-metadata.outputs.image-name }} 
     strategy:
       fail-fast: false
       matrix:
@@ -79,6 +77,21 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        if: inputs.publish
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Login to ECR
+        uses: docker/login-action@v3
+        if: inputs.publish 
+        with:
+          registry: ${{ vars.AWS_ECR_REGISTRY_ID }}
+          username: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          password: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+
       # This block is used to not hard-coded the secrets in Build Docker image
       # Secrets are only added when necessary 
       - name: Generate and mask build secrets
@@ -94,38 +107,70 @@ jobs:
           echo "EOF" >> $GITHUB_OUTPUT
         shell: bash
 
-      - name: Build Docker image
+      - name: Build and push to Docker Hub
+        id: build-dockerhub
         uses: docker/build-push-action@v6
-        id: build
         with:
           platforms: ${{ matrix.platform }}
-          outputs: type=docker,dest=/tmp/${{ env.IMAGE_NAME }}.tar
           context: ${{ inputs.dockerContext }}
           file: ${{ inputs.dockerfile }}
-          secrets: ${{ steps.set-build-secrets.outputs.SECRETS }}
+          tags: ${{ vars.DOCKERHUB_REGISTRY_ID }}/${{ needs.prepare-metadata.outputs.image-name }}:${{ matrix.platform }}
+          push: ${{ inputs.publish }}
+
+      - name: Build and push to ECR
+        id: build-ecr
+        uses: docker/build-push-action@v6
+        with:
+          platforms: ${{ matrix.platform }}
+          context: ${{ inputs.dockerContext }}
+          file: ${{ inputs.dockerfile }}
+          tags: ${{ vars.AWS_ECR_REGISTRY_ID }}/${{ needs.prepare-metadata.outputs.image-name }}:${{ matrix.platform }}
+          push: ${{ inputs.publish }}
       
-      - name: Upload Docker image to workspace
-        if: inputs.publish == true
+      - name: Export digest Docker Hub
+        if: inputs.publish
+        run: |
+          mkdir -p /tmp/digests/dockerhub
+          digest="${{ steps.build-dockerhub.outputs.digest }}"
+          echo "$digest" > "/tmp/digests/dockerhub/${digest#sha256:}"
+        
+      - name: Export digest ECR
+        if: inputs.publish
+        run: |
+          mkdir -p /tmp/digests/ecr
+          digest="${{ steps.build-ecr.outputs.digest }}"
+          echo "$digest" > "/tmp/digests/ecr/${digest#sha256:}"
+
+      - name: Upload Docker Hub digest
+        if: inputs.publish
         uses: actions/upload-artifact@v4
         with:
-          name: "${{ env.IMAGE_NAME }}-${{ env.PLATFORM_PAIR }}"
-          path: /tmp/${{ env.IMAGE_NAME }}.tar
-          retention-days: 1     
-      
+          name: digests-dockerhub-${{ env.PLATFORM_PAIR }}
+          path: /tmp/digests/dockerhub/*
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Upload ECR digest
+        if: inputs.publish
+        uses: actions/upload-artifact@v4
+        with:
+          name: digests-ecr-${{ env.PLATFORM_PAIR }}
+          path: /tmp/digests/ecr/*
+          if-no-files-found: error
+          retention-days: 1
+
   merge_dockerhub:
     runs-on: ubuntu-latest
     if: inputs.publish
     needs:
       - docker_build
       - prepare-metadata
-    env:
-      IMAGE_NAME: ${{ needs.prepare-metadata.outputs.image-name }} 
     steps:
-      - name: Download Docker image artifacts
+      - name: Download digests
         uses: actions/download-artifact@v4
         with:
-          path: /tmp/
-          pattern: ${{ env.IMAGE_NAME }}-*
+          path: /tmp/digests
+          pattern: digests-dockerhub-*
           merge-multiple: true
       
       - name: Set up Docker Buildx
@@ -136,7 +181,7 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ${{ vars.DOCKERHUB_REGISTRY_ID }}/${{ needs.prepare-metadata.outputs.image-name }}
-          ags: |
+          tags: |
             type=sha,enable=true,priority=100,prefix=,suffix=,format=long
             type=ref,enable=true,priority=200,prefix=,suffix=,event=tag
       
@@ -149,10 +194,14 @@ jobs:
       - name: Create manifest list and push
         working-directory: /tmp/digests
         run: |
-          tags=$(jq -cr '.tags | map("-t " + .) | join(" ")'  <<< "$DOCKER_METADATA_OUTPUT_JSON")
-          digests=$(printf "${{ vars.DOCKERHUB_REGISTRY_ID }}/${{ needs.prepare-metadata.outputs.image-name }}@sha256:%s " $(ls /tmp/digests))
+          tags=$(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "${{ steps.meta.outputs.json }}")
+          digests=""
+          for digest_file in /tmp/digests/dockerhub/*; do
+            digest=$(basename "$digest_file")
+            digests+="${{ vars.DOCKERHUB_REGISTRY_ID }}/${{ needs.prepare-metadata.outputs.image-name }}@sha256:$digest "
+          done
           docker buildx imagetools create $tags $digests
-          
+      
       - name: Inspect image
         run: |
           docker buildx imagetools inspect ${{ vars.DOCKERHUB_REGISTRY_ID }}/${{ needs.prepare-metadata.outputs.image-name }}:${{ steps.meta.outputs.version }}
@@ -163,14 +212,12 @@ jobs:
     needs:
       - docker_build
       - prepare-metadata
-    env:
-      IMAGE_NAME: ${{ needs.prepare-metadata.outputs.image-name }} 
     steps:
-      - name: Download Docker image artifacts
+      - name: Download digests
         uses: actions/download-artifact@v4
         with:
-          path: /tmp/
-          pattern: ${{ env.IMAGE_NAME }}-*
+          path: /tmp/digests
+          pattern: digests-ecr-*
           merge-multiple: true
       
       - name: Set up Docker Buildx
@@ -180,7 +227,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ vars.AWS_ECR_REGISTRY_ID }}/${{ needs.prepare-metadata.outputs.image-name }} 
+          images: ${{ vars.AWS_ECR_REGISTRY_ID }}/${{ needs.prepare-metadata.outputs.image-name }}
           tags: |
             type=sha,enable=true,priority=100,prefix=,suffix=,format=long
             type=ref,enable=true,priority=200,prefix=,suffix=,event=tag
@@ -195,10 +242,14 @@ jobs:
       - name: Create manifest list and push
         working-directory: /tmp/digests
         run: |
-          tags=$(jq -cr '.tags | map("-t " + .) | join(" ")'  <<< "$DOCKER_METADATA_OUTPUT_JSON")
-          digests=$(printf "${{ vars.AWS_ECR_REGISTRY_ID }}/${{ needs.prepare-metadata.outputs.image-name }}@sha256:%s " $(ls /tmp/digests))
+          tags=$(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "${{ steps.meta.outputs.json }}")
+          digests=""
+          for digest_file in /tmp/digests/ecr/*; do
+            digest=$(basename "$digest_file")
+            digests+="${{ vars.AWS_ECR_REGISTRY_ID }}/${{ needs.prepare-metadata.outputs.image-name }}@sha256:$digest "
+          done
           docker buildx imagetools create $tags $digests
-          
+      
       - name: Inspect image
         run: |
           docker buildx imagetools inspect ${{ vars.AWS_ECR_REGISTRY_ID }}/${{ needs.prepare-metadata.outputs.image-name }}:${{ steps.meta.outputs.version }}
