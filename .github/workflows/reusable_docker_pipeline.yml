@@ -35,16 +35,15 @@ jobs:
   prepare-metadata:
     runs-on: ubuntu-22.04
     outputs:
-      build-secrets: ${{ steps.set-build-secrets.outputs.SECRETS }}
-      build-tags: ${{ steps.set-build-tags.outputs.TAGS }}
+      build-image: ${{ steps.set_image_name.outputs.IMAGE_NAME }}
     steps:
       - name: Determine image name
         id: set_image_name
         run: |
           if [ -n "${{ inputs.repoName }}" ]; then
-            echo "IMAGE_NAME=${{ inputs.repoName }}" >> $GITHUB_ENV
+            echo "IMAGE_NAME=${{ inputs.repoName }}" >> $GITHUB_OUTPUT
           else
-            echo "IMAGE_NAME=$(echo $GITHUB_REPOSITORY | cut -d '/' -f 2)" >> $GITHUB_ENV
+            echo "IMAGE_NAME=$(echo $GITHUB_REPOSITORY | cut -d '/' -f 2)" >> $GITHUB_OUTPUT
           fi
   docker_build:
     runs-on: ${{ matrix.runner }}
@@ -87,6 +86,7 @@ jobs:
 
       - name: Login to ECR
         uses: docker/login-action@v3
+        if: inputs.publish 
         with:
           registry: ${{ vars.AWS_ECR_REGISTRY_ID }}
           username: ${{ secrets.AWS_ACCESS_KEY_ID }}
