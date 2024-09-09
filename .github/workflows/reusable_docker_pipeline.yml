@@ -45,6 +45,7 @@ jobs:
           else
             echo "IMAGE_NAME=$(echo $GITHUB_REPOSITORY | cut -d '/' -f 2)" >> $GITHUB_OUTPUT
           fi
+
   docker_build:
     runs-on: ${{ matrix.runner }}
     needs: prepare-metadata
@@ -115,7 +116,6 @@ jobs:
           context: ${{ inputs.dockerContext }}
           file: ${{ inputs.dockerfile }}
           outputs: type=image,name=${{ vars.DOCKERHUB_REGISTRY_ID }}/${{ needs.prepare-metadata.outputs.image-name }},push-by-digest=true,push=${{ inputs.publish }}
-          push: ${{ inputs.publish }}
 
       - name: Build and push to ECR
         id: build-ecr
@@ -125,7 +125,6 @@ jobs:
           context: ${{ inputs.dockerContext }}
           file: ${{ inputs.dockerfile }}
           outputs: type=image,name=${{ vars.AWS_ECR_REGISTRY_ID }}/${{ needs.prepare-metadata.outputs.image-name }},push-by-digest=true,push=${{ inputs.publish }}
-          push: ${{ inputs.publish }}
       
       - name: Export digest Docker Hub
         if: inputs.publish
