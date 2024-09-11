@@ -2,8 +2,8 @@
 
 ## 0.5.0
 
-- resuable_docker_pipeline: Add `platforms` input to support Multi-platform image
-- resuable_docker_pipeline: Refractor docker_build job
+- reusable_docker_pipeline: Add `platforms` input to support Multi-platform image
+- reusable_docker_pipeline: Refactor docker_build job
 
 ## 0.4.0
 
