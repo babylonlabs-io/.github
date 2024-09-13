@@ -1,5 +1,10 @@
 # CHANGELOG
 
+## 0.5.0
+
+- reusable_docker_pipeline: Add `platforms` input to support Multi-platform image
+- reusable_docker_pipeline: Refactor docker_build job
+
 ## 0.4.0
 
 - reusable_go_lint_test: Add go-private-repos input, allowing access to private repositories

@@ -25,11 +25,50 @@ on:
         description: 'Enable authentication for private repositories'
         type: boolean
         default: false
+      platforms:
+        required: false
+        type: string
+        description: "Target platforms for Docker build"
+        default: "linux/amd64,linux/arm64"
 
 jobs:
-  docker_build:
+  prepare-metadata:
     runs-on: ubuntu-22.04
+    outputs:
+      image-name: ${{ steps.set_image_name.outputs.IMAGE_NAME }}
     steps:
+      - name: Determine image name
+        id: set_image_name
+        run: |
+          if [ -n "${{ inputs.repoName }}" ]; then
+            echo "IMAGE_NAME=${{ inputs.repoName }}" >> $GITHUB_OUTPUT
+          else
+            echo "IMAGE_NAME=$(echo $GITHUB_REPOSITORY | cut -d '/' -f 2)" >> $GITHUB_OUTPUT
+          fi
+
+  docker_build:
+    runs-on: ${{ matrix.runner }}
+    needs: prepare-metadata
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - linux/amd64
+          - linux/arm64
+        runner:
+          - ubuntu-24.04
+          - ubuntu-24.04-arm64
+        exclude:
+        - platform: linux/amd64
+          runner: ubuntu-24.04-arm64
+        - platform: linux/arm64
+          runner: ubuntu-24.04
+    steps:
+      - name: Prepare
+        run: |
+          platform=${{ matrix.platform }}
+          echo "PLATFORM_PAIR=${platform//\//-}" >> $GITHUB_ENV
+  
       - name: Checkout repository
         uses: actions/checkout@v4
 
@@ -38,20 +77,19 @@ jobs:
 
       - name: Login to Docker Hub
         uses: docker/login-action@v3
-        if: inputs.publish == true
+        if: inputs.publish
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Determine image name
-        id: set_image_name
-        run: |
-          if [ -n "${{ inputs.repoName }}" ]; then
-            echo "IMAGE_NAME=${{ inputs.repoName }}" >> $GITHUB_ENV
-          else
-            echo "IMAGE_NAME=$(echo $GITHUB_REPOSITORY | cut -d '/' -f 2)" >> $GITHUB_ENV
-          fi
-   
+      - name: Login to ECR
+        uses: docker/login-action@v3
+        if: inputs.publish 
+        with:
+          registry: ${{ vars.AWS_ECR_REGISTRY_ID }}
+          username: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          password: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+
       # This block is used to not hard-coded the secrets in Build Docker image
       # Secrets are only added when necessary 
       - name: Generate and mask build secrets
@@ -67,103 +105,139 @@ jobs:
           echo "EOF" >> $GITHUB_OUTPUT
         shell: bash
 
-      - name: Build Docker image
+      - name: Build and push to Docker Hub
+        id: build-dockerhub
         uses: docker/build-push-action@v6
         with:
-          tags: ${{ env.IMAGE_NAME }}:${{ github.sha }}
-          outputs: type=docker,dest=/tmp/${{ env.IMAGE_NAME }}.tar
+          platforms: ${{ matrix.platform }}
           context: ${{ inputs.dockerContext }}
           file: ${{ inputs.dockerfile }}
-          secrets: ${{ steps.set-build-secrets.outputs.SECRETS }}
- 
-      - name: Upload Docker image to workspace
-        if: inputs.publish == true
+          outputs: type=image,name=${{ vars.DOCKERHUB_REGISTRY_ID }}/${{ needs.prepare-metadata.outputs.image-name }},push-by-digest=true,push=${{ inputs.publish }}
+
+      - name: Build and push to ECR
+        id: build-ecr
+        uses: docker/build-push-action@v6
+        with:
+          platforms: ${{ matrix.platform }}
+          context: ${{ inputs.dockerContext }}
+          file: ${{ inputs.dockerfile }}
+          outputs: type=image,name=${{ vars.AWS_ECR_REGISTRY_ID }}/${{ needs.prepare-metadata.outputs.image-name }},push-by-digest=true,push=${{ inputs.publish }}
+      
+      - name: Export digest Docker Hub
+        if: inputs.publish
+        run: |
+          mkdir -p /tmp/digests/dockerhub
+          digest="${{ steps.build-dockerhub.outputs.digest }}"
+          echo "$digest" > "/tmp/digests/dockerhub/${digest#sha256:}"
+        
+      - name: Export digest ECR
+        if: inputs.publish
+        run: |
+          mkdir -p /tmp/digests/ecr
+          digest="${{ steps.build-ecr.outputs.digest }}"
+          echo "$digest" > "/tmp/digests/ecr/${digest#sha256:}"
+
+      - name: Upload Docker Hub digest
+        if: inputs.publish
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.IMAGE_NAME }}
-          path: /tmp/${{ env.IMAGE_NAME }}.tar
+          name: digests-dockerhub-${{ env.PLATFORM_PAIR }}
+          path: /tmp/digests/dockerhub/*
+          if-no-files-found: error
+          retention-days: 1
 
-  dockerhub_publish:
-    runs-on: ubuntu-22.04
-    if: inputs.publish == true
-    needs: ["docker_build"]
+      - name: Upload ECR digest
+        if: inputs.publish
+        uses: actions/upload-artifact@v4
+        with:
+          name: digests-ecr-${{ env.PLATFORM_PAIR }}
+          path: /tmp/digests/ecr/*
+          if-no-files-found: error
+          retention-days: 1
+
+  merge_dockerhub:
+    runs-on: ubuntu-latest
+    if: inputs.publish
+    needs:
+      - docker_build
+      - prepare-metadata
     steps:
-    - name: Determine image name
-      id: set_image_name
-      run: |
-        if [ -n "${{ inputs.repoName }}" ]; then
-          echo "IMAGE_NAME=${{ inputs.repoName }}" >> $GITHUB_ENV
-        else
-          echo "IMAGE_NAME=$(echo $GITHUB_REPOSITORY | cut -d '/' -f 2)" >> $GITHUB_ENV
-        fi
+      - name: Download digests
+        uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: digests-dockerhub-*
+          merge-multiple: true
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ vars.DOCKERHUB_REGISTRY_ID }}/${{ needs.prepare-metadata.outputs.image-name }}
+          tags: |
+            type=sha,enable=true,priority=100,prefix=,suffix=,format=long
+            type=ref,enable=true,priority=200,prefix=,suffix=,event=tag
+      
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      
+      - name: Create manifest list and push
+        working-directory: /tmp/digests
+        run: |
+          tags=$(jq -cr '.tags | map("-t " + .) | join(" ")'  <<< "$DOCKER_METADATA_OUTPUT_JSON")
+          digests=$(printf "${{ vars.DOCKERHUB_REGISTRY_ID }}/${{ needs.prepare-metadata.outputs.image-name }}@sha256:%s " $(ls /tmp/digests))
+          docker buildx imagetools create $tags $digests
+      
+      - name: Inspect image
+        run: |
+          docker buildx imagetools inspect ${{ vars.DOCKERHUB_REGISTRY_ID }}/${{ needs.prepare-metadata.outputs.image-name }}:${{ steps.meta.outputs.version }}
 
-    - name: Download Docker image from workspace
-      uses: actions/download-artifact@v4
-      with:
-        name: ${{ env.IMAGE_NAME }}
-        path: /tmp/
-
-    - name: Load Docker image
-      run: docker load -i /tmp/${{ env.IMAGE_NAME }}.tar
-
-    - name: Login to Docker Hub
-      uses: docker/login-action@v3
-      with:
-        username: ${{ secrets.DOCKERHUB_USERNAME }}
-        password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-    - name: Push Docker image with SHA
-      run: |
-        docker tag ${{ env.IMAGE_NAME }}:${{ github.sha }} ${{ vars.DOCKERHUB_REGISTRY_ID }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
-        docker push ${{ vars.DOCKERHUB_REGISTRY_ID }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
-
-    - name: Push Docker image with Tag
-      if: startsWith(github.ref, 'refs/tags/')
-      run: |
-        docker tag ${{ env.IMAGE_NAME }}:${{ github.sha }} ${{ vars.DOCKERHUB_REGISTRY_ID }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }}
-        docker push ${{ vars.DOCKERHUB_REGISTRY_ID }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }}
-
-  ecr_publish:
-    runs-on: ubuntu-22.04
-    if: inputs.publish == true
-    needs: ["docker_build"]
+  merge_ecr:
+    runs-on: ubuntu-latest
+    if: inputs.publish
+    needs:
+      - docker_build
+      - prepare-metadata
     steps:
-    - name: Determine image name
-      id: set_image_name
-      run: |
-        if [ -n "${{ inputs.repoName }}" ]; then
-          echo "IMAGE_NAME=${{ inputs.repoName }}" >> $GITHUB_ENV
-        else
-          echo "IMAGE_NAME=$(echo $GITHUB_REPOSITORY | cut -d '/' -f 2)" >> $GITHUB_ENV
-        fi
-
-    - name: Download Docker image from workspace
-      uses: actions/download-artifact@v4
-      with:
-        name: ${{ env.IMAGE_NAME }}
-        path: /tmp/
-
-    - name: Load Docker image
-      run: docker load -i /tmp/${{ env.IMAGE_NAME }}.tar
-
-    - name: Configure AWS credentials
-      uses: aws-actions/configure-aws-credentials@v4
-      with:
-        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        aws-region: ${{ vars.AWS_ECR_REGION }}
-
-    - name: Login to Amazon ECR Private
-      id: login-ecr
-      uses: aws-actions/amazon-ecr-login@v2
-
-    - name: Push Docker image with SHA
-      run: |
-        docker tag ${{ env.IMAGE_NAME }}:${{ github.sha }} ${{ vars.AWS_ECR_REGISTRY_ID }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
-        docker push ${{ vars.AWS_ECR_REGISTRY_ID }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
-
-    - name: Push Docker image with Tag
-      if: startsWith(github.ref, 'refs/tags/')
-      run: |
-        docker tag ${{ env.IMAGE_NAME }}:${{ github.sha }} ${{ vars.AWS_ECR_REGISTRY_ID }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }}
-        docker push ${{ vars.AWS_ECR_REGISTRY_ID }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }}
+      - name: Download digests
+        uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: digests-ecr-*
+          merge-multiple: true
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ vars.AWS_ECR_REGISTRY_ID }}/${{ needs.prepare-metadata.outputs.image-name }}
+          tags: |
+            type=sha,enable=true,priority=100,prefix=,suffix=,format=long
+            type=ref,enable=true,priority=200,prefix=,suffix=,event=tag
+      
+      - name: Login to ECR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ vars.AWS_ECR_REGISTRY_ID }}
+          username: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          password: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      
+      - name: Create manifest list and push
+        working-directory: /tmp/digests/
+        run: |
+          tags=$(jq -cr '.tags | map("-t " + .) | join(" ")'  <<< "$DOCKER_METADATA_OUTPUT_JSON")
+          digests=$(printf "${{ vars.AWS_ECR_REGISTRY_ID }}/${{ needs.prepare-metadata.outputs.image-name }}@sha256:%s " $(ls /tmp/digests))
+          docker buildx imagetools create $tags $digests
+      
+      - name: Inspect image
+        run: |
+          docker buildx imagetools inspect ${{ vars.AWS_ECR_REGISTRY_ID }}/${{ needs.prepare-metadata.outputs.image-name }}:${{ steps.meta.outputs.version }}
