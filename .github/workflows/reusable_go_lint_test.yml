@@ -49,6 +49,11 @@ on:
         description: 'Run GoSec'
         type: boolean
         default: false
+      gosec-args:
+        description: 'Arguments when running gosec'
+        required: false
+        type: string
+        default: './...'
       go-private-repos-authentication:
         description: 'Enable authentication for private repositories'
         type: boolean
@@ -226,4 +231,4 @@ jobs:
       - name: Run Gosec Security Scanner
         uses: securego/gosec@master
         with:
-          args: ./...
+          args: ${{ inputs.gosec-args }}
