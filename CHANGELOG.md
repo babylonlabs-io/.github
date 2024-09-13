@@ -1,5 +1,9 @@
 # CHANGELOG
 
+## 0.6.0
+
+- reusable_go_lint_test: Add Gosec job to inspects source code for security problems
+
 ## 0.5.0
 
 - reusable_docker_pipeline: Add `platforms` input to support Multi-platform image
