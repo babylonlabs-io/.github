@@ -33,7 +33,7 @@ on:
 
 jobs:
   prepare-metadata:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     outputs:
       image-name: ${{ steps.set_image_name.outputs.IMAGE_NAME }}
     steps:
