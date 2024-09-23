@@ -61,7 +61,7 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     if: ${{ inputs.run-build }}
     steps:
       - name: Checkout repository
@@ -99,7 +99,7 @@ jobs:
         run: make build
 
   lint:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     if: ${{ inputs.run-lint }}
     steps:
       - name: Checkout repository
@@ -126,7 +126,7 @@ jobs:
           args: --timeout=10m
 
   unit-tests:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     if: ${{ inputs.run-unit-tests }}
 
     steps:
@@ -152,7 +152,7 @@ jobs:
           make test
 
   integration-tests:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     if: ${{ inputs.run-integration-tests }}
     steps:
       - name: Checkout repository
@@ -183,7 +183,7 @@ jobs:
         run: ${{ inputs.integration-tests-command }}
 
   check-mock-gen:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     if: ${{ inputs.run-check-mock-gen }}
     steps:
       - name: Checkout repository
@@ -208,7 +208,7 @@ jobs:
             exit 1
           fi
   gosec:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     if: ${{ inputs.run-gosec }}
     steps:
       - name: Checkout repository
