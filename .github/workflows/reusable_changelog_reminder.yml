@@ -1,3 +1,4 @@
+# adapted from https://github.com/osmosis-labs/osmosis/blob/main/.goreleaser.yaml
 name: Changelog Reminder
 on:
   workflow_call:

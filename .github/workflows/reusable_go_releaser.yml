@@ -1,3 +1,4 @@
+# adapted from https://github.com/goreleaser/goreleaser-action
 name: Go Releaser
 
 on:
@@ -13,7 +14,9 @@ permissions:
 
 jobs:
   goreleaser:
+    name: Go Releaser
     runs-on: ubuntu-24.04
+    if: ${{ inputs.run-releaser }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
