@@ -1,5 +1,10 @@
 # CHANGELOG
 
+## 0.7.0
+
+- reusable_changelog_reminder: Add changelog reminder to remind PR submitters to update changelog
+- reusable_go_releaser: Add go releaser to create a release upon a tagged version
+
 ## 0.6.0
 
 - reusable_go_lint_test: Add Gosec job to inspects source code for security problems
