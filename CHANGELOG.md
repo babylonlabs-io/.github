@@ -1,5 +1,10 @@
 # CHANGELOG
 
+## 0.8.0
+
+- reusable_docker_pipeline: Set default values for AWS_ECR_REGISTRY_ID and DOCKERHUB_REGISTRY_ID
+- add backport release pipeline
+
 ## 0.7.0
 
 - reusable_changelog_reminder: Add changelog reminder to remind PR submitters to update changelog

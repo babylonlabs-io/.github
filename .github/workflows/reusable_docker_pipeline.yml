@@ -112,7 +112,7 @@ jobs:
           platforms: ${{ matrix.platform }}
           context: ${{ inputs.dockerContext }}
           file: ${{ inputs.dockerfile }}
-          outputs: type=image,name=${{ vars.DOCKERHUB_REGISTRY_ID }}/${{ needs.prepare-metadata.outputs.image-name }},push-by-digest=true,push=${{ inputs.publish }}
+          outputs: type=image,name=${{ vars.DOCKERHUB_REGISTRY_ID || 'babylonlabs' }}/${{ needs.prepare-metadata.outputs.image-name }},push-by-digest=true,push=${{ inputs.publish }}
 
       - name: Build and push to ECR
         id: build-ecr
@@ -121,7 +121,7 @@ jobs:
           platforms: ${{ matrix.platform }}
           context: ${{ inputs.dockerContext }}
           file: ${{ inputs.dockerfile }}
-          outputs: type=image,name=${{ vars.AWS_ECR_REGISTRY_ID }}/${{ needs.prepare-metadata.outputs.image-name }},push-by-digest=true,push=${{ inputs.publish }}
+          outputs: type=image,name=${{ vars.AWS_ECR_REGISTRY_ID || 'babylonlabs' }}/${{ needs.prepare-metadata.outputs.image-name }},push-by-digest=true,push=${{ inputs.publish }}
       
       - name: Export digest Docker Hub
         if: inputs.publish
