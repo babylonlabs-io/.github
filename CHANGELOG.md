@@ -1,5 +1,9 @@
 # CHANGELOG
 
+## 0.9.0
+
+- reusable_node_lint_test: Support publishing a package
+
 ## 0.8.0
 
 - reusable_docker_pipeline: Set default values for AWS_ECR_REGISTRY_ID and DOCKERHUB_REGISTRY_ID
