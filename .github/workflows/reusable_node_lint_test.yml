@@ -59,8 +59,6 @@ jobs:
 
     - name: Publish package
       if: ${{ inputs.publish }}
-      with:
-        npm_token: ${{ secrets.NPM_TOKEN }}
       run: |
-        echo "//registry.npmjs.org/:_authToken=$npm_token" > .npmrc
+        echo "//registry.npmjs.org/:_authToken=${{ secrets.NPM_TOKEN }}" > .npmrc
         ${{ inputs.publish-command }}
