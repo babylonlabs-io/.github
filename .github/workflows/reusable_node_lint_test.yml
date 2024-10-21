@@ -19,6 +19,15 @@ on:
         description: 'Run npm build'
         type: boolean
         default: false
+      publish:
+        description: 'Publish npm package'
+        type: boolean
+        default: false
+      publish-command:
+        description: 'Publish npm package command'
+        type: string
+        required: false
+        default: 'npm publish'
 
 jobs:
   build:
@@ -47,3 +56,9 @@ jobs:
     - name: Build project
       if: ${{ inputs.run-build }}
       run: npm run build
+
+    - name: Publish package
+      if: ${{ inputs.publish }}
+      run: |
+        echo "//registry.npmjs.org/:_authToken=${{ secrets.NPM_TOKEN }}" > .npmrc
+        ${{ inputs.publish-command }}
