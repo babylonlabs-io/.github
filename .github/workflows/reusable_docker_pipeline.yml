@@ -262,9 +262,10 @@ jobs:
     - name: Run Trivy vulnerability scanner
       uses: aquasecurity/trivy-action@0.28.0
       with:
-        # image-ref: "${{ vars.DOCKERHUB_REGISTRY_ID || 'babylonlabs' }}/${{ needs.prepare-metadata.outputs.image-name }}"
-        image-ref: 'babylonlabs/btc-staker'
+        image-ref: "${{ vars.DOCKERHUB_REGISTRY_ID }}/${{ needs.prepare-metadata.outputs.image-name }}"
+        # image-ref: 'babylonlabs/btc-staker'
         output: 'trivy-results.sarif'
+        trivy-config: /tmp/trivy.yaml
       env:
         TRIVY_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
         TRIVY_PASSWORD: ${{ secrets.DOCKERHUB_TOKEN }}
