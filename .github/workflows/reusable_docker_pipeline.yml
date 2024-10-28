@@ -252,7 +252,7 @@ jobs:
     - name: Run Trivy vulnerability scanner
       uses: aquasecurity/trivy-action@0.28.0
       with:
-        image-ref: ${{ needs.prepare-metadata.outputs.image-name }}
+        image-ref: ${{ vars.AWS_ECR_REGISTRY_ID }}/${{ needs.prepare-metadata.outputs.image-name }}
         format: 'sarif'
         output: 'trivy-results.sarif'
         exit-code: '1'
@@ -260,6 +260,9 @@ jobs:
         vuln-type: 'os,library'
         severity: 'CRITICAL,HIGH'
         db-repository: 'aquasec/trivy-db'
+      env:
+        AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
     - name: Upload Trivy scan results to GitHub Security tab
       uses: github/codeql-action/upload-sarif@v3
       with:
