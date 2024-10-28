@@ -241,3 +241,25 @@ jobs:
       - name: Inspect image
         run: |
           docker buildx imagetools inspect ${{ vars.AWS_ECR_REGISTRY_ID }}/${{ needs.prepare-metadata.outputs.image-name }}:${{ steps.meta.outputs.version }}
+
+  security_check:
+    runs-on: ubuntu-latest
+    # if: inputs.publish
+    needs:
+    - docker_build
+    - prepare-metadata
+    steps:
+    - name: Run Trivy vulnerability scanner
+      uses: aquasecurity/trivy-action@0.28.0
+      with:
+        image-ref: ${{ needs.prepare-metadata.outputs.image-name }}
+        format: 'sarif'
+        output: 'trivy-results.sarif'
+        exit-code: '1'
+        ignore-unfixed: true
+        vuln-type: 'os,library'
+        severity: 'CRITICAL,HIGH'
+    - name: Upload Trivy scan results to GitHub Security tab
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: 'trivy-results.sarif'
