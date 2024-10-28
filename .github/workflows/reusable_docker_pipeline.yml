@@ -252,7 +252,7 @@ jobs:
     - name: Run Trivy vulnerability scanner
       uses: aquasecurity/trivy-action@0.28.0
       with:
-        image-ref: '${{ vars.DOCKERHUB_REGISTRY_ID }}/${{ needs.prepare-metadata.outputs.image-name }}'
+        image-ref: "${{ vars.DOCKERHUB_REGISTRY_ID || 'babylonlabs' }}/${{ needs.prepare-metadata.outputs.image-name }}"
         format: 'sarif'
         output: 'trivy-results.sarif'
         exit-code: '1'
