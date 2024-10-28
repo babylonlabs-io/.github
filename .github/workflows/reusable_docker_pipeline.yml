@@ -249,18 +249,22 @@ jobs:
     - docker_build
     - prepare-metadata
     steps:
+    - name: Create Trivy config
+      run: |
+        cat <<EOF > /tmp/trivy.yaml
+          format: 'sarif'
+          exit-code: '1'
+          ignore-unfixed: true  
+          vuln-type: 'os,library'
+          severity: 'CRITICAL,HIGH'
+          db-repository: 'aquasec/trivy-db'
+        EOF 
     - name: Run Trivy vulnerability scanner
       uses: aquasecurity/trivy-action@0.28.0
       with:
         # image-ref: "${{ vars.DOCKERHUB_REGISTRY_ID || 'babylonlabs' }}/${{ needs.prepare-metadata.outputs.image-name }}"
         image-ref: 'babylonlabs/btc-staker'
-        format: 'sarif'
         output: 'trivy-results.sarif'
-        exit-code: '1'
-        ignore-unfixed: true  
-        vuln-type: 'os,library'
-        severity: 'CRITICAL,HIGH'
-        db-repository: 'aquasec/trivy-db'
       env:
         TRIVY_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
         TRIVY_PASSWORD: ${{ secrets.DOCKERHUB_TOKEN }}
