@@ -198,7 +198,7 @@ jobs:
       
       - name: Inspect image
         run: |
-          docker buildx imagetools inspect ${{ vars.DOCKERHUB_REGISTRY_ID }}/${{ needs.prepare-metadata.outputs.image-name }}:${{ needs.docker_build.outputs.dockerhub-sha }}
+          docker buildx imagetools inspect ${{ vars.DOCKERHUB_REGISTRY_ID }}/${{ needs.prepare-metadata.outputs.image-name }}:${{ steps.meta.outputs.version }}
 
   merge_ecr:
     runs-on: ubuntu-latest
@@ -271,7 +271,7 @@ jobs:
     - name: Run Trivy vulnerability scanner
       uses: aquasecurity/trivy-action@0.28.0
       with:
-        image-ref: "${{ vars.DOCKERHUB_REGISTRY_ID }}/${{ needs.prepare-metadata.outputs.image-name }}:${{ steps.build-dockerhub.outputs.digest }}"
+        image-ref: "${{ vars.DOCKERHUB_REGISTRY_ID }}/${{ needs.prepare-metadata.outputs.image-name }}:${{ needs.docker_build.outputs.dockerhub-sha }}"
         trivy-config: /tmp/trivy.yaml
       env:
         TRIVY_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
