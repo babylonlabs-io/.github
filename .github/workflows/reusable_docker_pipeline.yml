@@ -254,6 +254,7 @@ jobs:
         cat <<EOF > /tmp/trivy.yaml
         format: sarif
         # exit-code: '1'
+        output: trivy-results.sarif
         vulnerability:
           ignore-unfixed: true  
           type: 
@@ -270,7 +271,6 @@ jobs:
       with:
         image-ref: "${{ vars.DOCKERHUB_REGISTRY_ID }}/${{ needs.prepare-metadata.outputs.image-name }}"
         # image-ref: 'babylonlabs/btc-staker'
-        output: 'trivy-results.sarif'
         trivy-config: /tmp/trivy.yaml
       env:
         TRIVY_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
