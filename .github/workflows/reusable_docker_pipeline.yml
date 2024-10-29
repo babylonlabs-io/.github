@@ -1,5 +1,9 @@
 name: Docker Build & Publish
-
+permissions:
+  # required for all workflows
+  security-events: write
+  # required to fetch internal or private CodeQL packs
+  packages: read
 on:
   workflow_call:
     inputs:
@@ -248,11 +252,6 @@ jobs:
     needs:
     - docker_build
     - prepare-metadata
-    permissions:
-      # required for all workflows
-      security-events: write
-      # required to fetch internal or private CodeQL packs
-      packages: read
     steps:
     - name: Create Trivy config
       run: |
