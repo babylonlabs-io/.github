@@ -283,3 +283,12 @@ jobs:
       uses: github/codeql-action/upload-sarif@v3
       with:
         sarif_file: 'trivy-results.sarif'
+    - name: Dockerfile Linting
+      uses: hadolint/hadolint-action@v3.1.0
+      with:
+        output-file: hadolint-result.sarif
+        format: sarif
+    - name: Upload linting results to GitHub Security tab
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: hadolint-result.sarif     
