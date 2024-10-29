@@ -242,7 +242,7 @@ jobs:
         run: |
           docker buildx imagetools inspect ${{ vars.AWS_ECR_REGISTRY_ID }}/${{ needs.prepare-metadata.outputs.image-name }}:${{ steps.meta.outputs.version }}
 
-  security_check:
+  vulnerability_scan:
     runs-on: ubuntu-latest
     # if: inputs.publish
     needs:
@@ -280,6 +280,15 @@ jobs:
       if: always()
       with:
         sarif_file: 'trivy-results.sarif'
+
+
+  dockerfile_lint:
+    runs-on: ubuntu-latest
+      # if: inputs.publish
+    needs:
+      - docker_build
+      - prepare-metadata
+    steps:
     - uses: actions/checkout@v3
     - name: Dockerfile Linting
       uses: hadolint/hadolint-action@v3.1.0
