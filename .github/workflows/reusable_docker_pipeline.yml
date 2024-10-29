@@ -248,10 +248,6 @@ jobs:
     needs:
     - docker_build
     - prepare-metadata
-    permissions:
-      security-events: write
-      actions: read
-      contents: read
     steps:
     - name: Create Trivy config
       run: |
