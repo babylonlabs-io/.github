@@ -252,12 +252,18 @@ jobs:
     - name: Create Trivy config
       run: |
         cat <<EOF > /tmp/trivy.yaml
-        format: 'sarif'
+        format: sarif
         # exit-code: '1'
-        ignore-unfixed: true  
-        vuln-type: 'os,library'
-        severity: 'CRITICAL,HIGH'
-        db-repository: 'aquasec/trivy-db'
+        vulnerability:
+          ignore-unfixed: true  
+          type: 
+            - os
+            - library
+        severity: 
+          - CRITICAL
+          - HIGH
+        db:
+          repository: index.docker.io/aquasec/trivy-db:2
         EOF
     - name: Run Trivy vulnerability scanner
       uses: aquasecurity/trivy-action@0.28.0
