@@ -49,6 +49,8 @@ jobs:
   docker_build:
     runs-on: ${{ matrix.runner }}
     needs: prepare-metadata
+    outputs:
+      dockerhub-sha: ${{ steps.build-dockerhub.outputs.digest}}
     strategy:
       fail-fast: false
       matrix:
@@ -196,7 +198,7 @@ jobs:
       
       - name: Inspect image
         run: |
-          docker buildx imagetools inspect ${{ vars.DOCKERHUB_REGISTRY_ID }}/${{ needs.prepare-metadata.outputs.image-name }}:${{ steps.meta.outputs.version }}
+          docker buildx imagetools inspect ${{ vars.DOCKERHUB_REGISTRY_ID }}/${{ needs.prepare-metadata.outputs.image-name }}:${{ needs.docker_build.outputs.dockerhub-sha }}
 
   merge_ecr:
     runs-on: ubuntu-latest
