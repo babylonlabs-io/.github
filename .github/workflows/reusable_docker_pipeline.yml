@@ -181,6 +181,8 @@ jobs:
     needs:
       - docker_build
       - prepare-metadata
+    outputs:
+      dockerhub_imgver: ${{ steps.meta.outputs.version }}
     steps:
       - name: Download digests
         uses: actions/download-artifact@v4
@@ -268,6 +270,7 @@ jobs:
     needs:
     - docker_build
     - prepare-metadata
+    - merge_dockerhub
     steps:
     - name: Create Trivy config
       run: |
@@ -289,7 +292,7 @@ jobs:
     - name: Run Trivy vulnerability scanner
       uses: aquasecurity/trivy-action@0.28.0
       with:
-        image-ref: "${{ vars.DOCKERHUB_REGISTRY_ID }}/${{ needs.prepare-metadata.outputs.image-name }}@${{ needs.docker_build.outputs.dockerhub-sha }}"
+        image-ref: "${{ vars.DOCKERHUB_REGISTRY_ID }}/${{ needs.prepare-metadata.outputs.image-name }}:${{ needs.merge_dockerhub.outputs.dockerhub_imgver }}"
         trivy-config: /tmp/trivy.yaml
       env:
         TRIVY_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
