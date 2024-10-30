@@ -47,7 +47,7 @@ jobs:
           fi
 
   dockerfile_lint:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
       # if: inputs.publish
     needs:
       - docker_build
@@ -265,7 +265,7 @@ jobs:
           docker buildx imagetools inspect ${{ vars.AWS_ECR_REGISTRY_ID }}/${{ needs.prepare-metadata.outputs.image-name }}:${{ steps.meta.outputs.version }}
 
   vulnerability_scan:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # if: inputs.publish
     needs:
     - docker_build
