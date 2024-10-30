@@ -48,9 +48,6 @@ jobs:
 
   dockerfile_lint:
     runs-on: ubuntu-24.04
-    needs:
-      - docker_build
-      - prepare-metadata
     steps:
     - uses: actions/checkout@v3
     - name: Dockerfile Linting
@@ -67,7 +64,9 @@ jobs:
 
   docker_build:
     runs-on: ${{ matrix.runner }}
-    needs: prepare-metadata
+    needs: 
+      - prepare-metadata
+      - dockerfile_lint
     outputs:
       dockerhub-sha: ${{ steps.build-dockerhub.outputs.digest}}
     strategy:
