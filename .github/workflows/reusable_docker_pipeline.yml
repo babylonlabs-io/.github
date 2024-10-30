@@ -48,7 +48,6 @@ jobs:
 
   dockerfile_lint:
     runs-on: ubuntu-24.04
-      # if: inputs.publish
     needs:
       - docker_build
       - prepare-metadata
@@ -266,7 +265,7 @@ jobs:
 
   vulnerability_scan:
     runs-on: ubuntu-24.04
-    # if: inputs.publish
+    if: inputs.publish
     needs:
     - docker_build
     - prepare-metadata
