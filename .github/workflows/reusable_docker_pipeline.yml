@@ -269,6 +269,7 @@ jobs:
     if: inputs.publish
     needs:
     - merge_dockerhub
+    - prepare-metadata
     steps:
     - name: Create Trivy config
       run: |
