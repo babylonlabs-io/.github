@@ -268,8 +268,6 @@ jobs:
     runs-on: ubuntu-24.04
     if: inputs.publish
     needs:
-    - docker_build
-    - prepare-metadata
     - merge_dockerhub
     steps:
     - name: Create Trivy config
