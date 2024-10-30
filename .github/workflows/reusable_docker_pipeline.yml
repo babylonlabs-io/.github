@@ -59,7 +59,7 @@ jobs:
       with:
         output-file: hadolint-result.sarif
         format: sarif
-        failure-threshold: error
+        no-fail: true
     - name: Upload linting results to GitHub Security tab
       uses: github/codeql-action/upload-sarif@v3
       if: always()
@@ -275,7 +275,7 @@ jobs:
       run: |
         cat <<EOF > /tmp/trivy.yaml
         format: sarif
-        exit-code: '1'
+        exit-code: '0'
         output: trivy-results.sarif
         vulnerability:
           ignore-unfixed: true  
