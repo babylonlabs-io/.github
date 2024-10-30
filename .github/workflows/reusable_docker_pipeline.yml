@@ -46,6 +46,26 @@ jobs:
             echo "IMAGE_NAME=$(echo $GITHUB_REPOSITORY | cut -d '/' -f 2)" >> $GITHUB_OUTPUT
           fi
 
+  dockerfile_lint:
+    runs-on: ubuntu-latest
+      # if: inputs.publish
+    needs:
+      - docker_build
+      - prepare-metadata
+    steps:
+    - uses: actions/checkout@v3
+    - name: Dockerfile Linting
+      uses: hadolint/hadolint-action@v3.1.0
+      with:
+        output-file: hadolint-result.sarif
+        format: sarif
+        failure-threshold: error
+    - name: Upload linting results to GitHub Security tab
+      uses: github/codeql-action/upload-sarif@v3
+      if: always()
+      with:
+        sarif_file: hadolint-result.sarif     
+
   docker_build:
     runs-on: ${{ matrix.runner }}
     needs: prepare-metadata
@@ -282,23 +302,3 @@ jobs:
       with:
         sarif_file: 'trivy-results.sarif'
 
-
-  dockerfile_lint:
-    runs-on: ubuntu-latest
-      # if: inputs.publish
-    needs:
-      - docker_build
-      - prepare-metadata
-    steps:
-    - uses: actions/checkout@v3
-    - name: Dockerfile Linting
-      uses: hadolint/hadolint-action@v3.1.0
-      with:
-        output-file: hadolint-result.sarif
-        format: sarif
-        failure-threshold: error
-    - name: Upload linting results to GitHub Security tab
-      uses: github/codeql-action/upload-sarif@v3
-      if: always()
-      with:
-        sarif_file: hadolint-result.sarif     
