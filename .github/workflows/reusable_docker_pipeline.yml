@@ -67,8 +67,6 @@ jobs:
     needs: 
       - prepare-metadata
       - dockerfile_lint
-    outputs:
-      dockerhub-sha: ${{ steps.build-dockerhub.outputs.digest}}
     strategy:
       fail-fast: false
       matrix:
