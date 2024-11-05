@@ -30,6 +30,11 @@ on:
         type: string
         description: "Target platforms for Docker build"
         default: "linux/amd64,linux/arm64"
+      docker_scan:
+        required: false
+        type: boolean
+        description: 'Enable Trivy & Hadolint'
+        default: false
 
 jobs:
   prepare-metadata:
@@ -48,6 +53,7 @@ jobs:
 
   dockerfile_lint:
     runs-on: ubuntu-24.04
+    if: inputs.docker_scan
     steps:
     - uses: actions/checkout@v3
     - name: Dockerfile Linting
@@ -264,7 +270,7 @@ jobs:
 
   vulnerability_scan:
     runs-on: ubuntu-24.04
-    if: inputs.publish
+    if: inputs.publish && inputs.docker_scan
     needs:
     - merge_dockerhub
     - prepare-metadata
