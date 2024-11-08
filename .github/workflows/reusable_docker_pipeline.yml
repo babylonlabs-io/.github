@@ -299,6 +299,7 @@ jobs:
       with:
         image-ref: "${{ vars.DOCKERHUB_REGISTRY_ID }}/${{ needs.prepare-metadata.outputs.image-name }}:${{ needs.merge_dockerhub.outputs.dockerhub_imgver }}"
         trivy-config: /tmp/trivy.yaml
+        trivyignores: .trivyignore.yaml
       env:
         TRIVY_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
         TRIVY_PASSWORD: ${{ secrets.DOCKERHUB_TOKEN }}
