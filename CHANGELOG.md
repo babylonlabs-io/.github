@@ -1,6 +1,10 @@
 # CHANGELOG
 
-## 0.9.0
+## 0.10.1
+
+- Enable .trivyignore usage
+
+## 0.10.0
 
 - Add Trivy Vulnerability scanner
 - Add Hadolint
