@@ -306,7 +306,7 @@ jobs:
         EOF
     - name: Determine if we should fail the pipeline when Vulnerability found
       run: |
-        if [[ "$TRIVY_NOFAIL == "false" ]]; then 
+        if [[ "$TRIVY_NOFAIL" == "false" ]]; then 
           echo "exit-code: '1'" >> /tmp/trivy.yaml; else
           echo "exit-code: '0'" >> /tmp/trivy.yaml; 
         fi
