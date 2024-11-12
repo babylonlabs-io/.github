@@ -280,7 +280,6 @@ jobs:
 
   vulnerability_scan:
     runs-on: ubuntu-24.04
-    environment: ${{ inputs.trivy_nofail }}
     if: inputs.publish && inputs.docker_scan
     needs:
     - merge_dockerhub
