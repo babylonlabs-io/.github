@@ -71,6 +71,7 @@ jobs:
         output-file: hadolint-result.sarif
         format: sarif
         no-fail: ${{ inputs.hadolint_nofail }}
+        dockerfile: ${{ inputs.dockerfile }}
     - name: Upload linting results to GitHub Security tab
       uses: github/codeql-action/upload-sarif@v3
       if: always()
