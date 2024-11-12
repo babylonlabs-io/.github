@@ -1,5 +1,10 @@
 # CHANGELOG
 
+## 0.10.2
+
+- Add inputs to allow Trivy failing: trivy_failable
+- Add inputs to allow Hadolint failing: hadolint_failable
+
 ## 0.10.1
 
 - Enable .trivyignore usage
