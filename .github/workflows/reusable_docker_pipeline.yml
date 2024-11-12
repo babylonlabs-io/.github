@@ -310,8 +310,18 @@ jobs:
           echo "exit-code: '1'" >> /tmp/trivy.yaml; else
           echo "exit-code: '0'" >> /tmp/trivy.yaml; 
         fi
-    - name: Run Trivy vulnerability scanner
+    - name: Run Trivy vulnerability scanner - Without ignore
       uses: aquasecurity/trivy-action@0.28.0
+      if: ${{ hashFiles('.trivyignore') == '' }}
+      with:
+        image-ref: "${{ vars.DOCKERHUB_REGISTRY_ID }}/${{ needs.prepare-metadata.outputs.image-name }}:${{ needs.merge_dockerhub.outputs.dockerhub_imgver }}"
+        trivy-config: /tmp/trivy.yaml
+      env:
+        TRIVY_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+        TRIVY_PASSWORD: ${{ secrets.DOCKERHUB_TOKEN }}
+    - name: Run Trivy vulnerability scanner - With ignore
+      uses: aquasecurity/trivy-action@0.28.0
+      if: ${{ hashFiles('.trivyignore') != '' }}
       with:
         image-ref: "${{ vars.DOCKERHUB_REGISTRY_ID }}/${{ needs.prepare-metadata.outputs.image-name }}:${{ needs.merge_dockerhub.outputs.dockerhub_imgver }}"
         trivy-config: /tmp/trivy.yaml
