@@ -11,8 +11,7 @@
 
 ## 0.10.0
 
-- Add Trivy Vulnerability scanner
-- Add Hadolint
+- reusable_docker_pipeline: Add Trivy and Hadolint scanning
 
 ## 0.9.0
 
