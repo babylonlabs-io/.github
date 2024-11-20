@@ -2,6 +2,10 @@
 
 ## 0.9.0
 
+- reusable_node_lint_test: Support changesets release action
+
+## 0.9.0
+
 - reusable_node_lint_test: Support publishing a package
 
 ## 0.8.0
