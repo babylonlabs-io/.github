@@ -64,7 +64,9 @@ jobs:
     runs-on: ubuntu-24.04
     if: inputs.docker_scan
     steps:
-    - uses: actions/checkout@v3
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
     - name: Dockerfile Linting
       uses: hadolint/hadolint-action@v3.1.0
       with:
@@ -72,6 +74,7 @@ jobs:
         format: sarif
         no-fail: ${{ inputs.hadolint_nofail }}
         dockerfile: ${{ inputs.dockerfile }}
+
     - name: Upload linting results to GitHub Security tab
       uses: github/codeql-action/upload-sarif@v3
       if: always()
@@ -282,10 +285,12 @@ jobs:
     runs-on: ubuntu-24.04
     if: inputs.publish && inputs.docker_scan
     needs:
-    - merge_dockerhub
-    - prepare-metadata
+      - merge_dockerhub
+      - prepare-metadata
     steps:
-    - uses: actions/checkout@v3
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
     - name: Create Trivy config
       run: |
         cat <<EOF > /tmp/trivy.yaml
@@ -303,12 +308,14 @@ jobs:
         db:
           repository: index.docker.io/aquasec/trivy-db:2
         EOF
+
     - name: Determine if we should fail the pipeline when Vulnerability found
       run: |
         if [[ "${{ inputs.trivy_nofail }}" == "false" ]]; then 
           echo "exit-code: '1'" >> /tmp/trivy.yaml; else
           echo "exit-code: '0'" >> /tmp/trivy.yaml; 
         fi
+
     - name: Run Trivy vulnerability scanner - Without ignore
       uses: aquasecurity/trivy-action@0.28.0
       if: ${{ hashFiles('.trivyignore') == '' }}
@@ -318,6 +325,7 @@ jobs:
       env:
         TRIVY_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
         TRIVY_PASSWORD: ${{ secrets.DOCKERHUB_TOKEN }}
+
     - name: Run Trivy vulnerability scanner - With ignore
       uses: aquasecurity/trivy-action@0.28.0
       if: ${{ hashFiles('.trivyignore') != '' }}
@@ -328,9 +336,9 @@ jobs:
       env:
         TRIVY_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
         TRIVY_PASSWORD: ${{ secrets.DOCKERHUB_TOKEN }}
+
     - name: Upload Trivy scan results to GitHub Security tab
       uses: github/codeql-action/upload-sarif@v3
       if: always()
       with:
         sarif_file: 'trivy-results.sarif'
-
