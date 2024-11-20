@@ -38,12 +38,12 @@ on:
       hadolint_nofail:
         required: false
         type: boolean
-        description: 'Variable to control if we should fail the pipeline when Trivy found something'
+        description: 'Ignore Hadolint failures'
         default: true
       trivy_nofail:
         required: false
         type: boolean
-        description: 'Variable to control if we should fail the pipeline when Hadolint found something'
+        description: 'Ignore Trivy failures'
         default: true
 jobs:
   prepare-metadata:
