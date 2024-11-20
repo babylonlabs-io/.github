@@ -1,6 +1,6 @@
 # CHANGELOG
 
-## 0.9.0
+## 0.10.0
 
 - reusable_node_lint_test: Support changesets release action
 
