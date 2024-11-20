@@ -1,5 +1,18 @@
 # CHANGELOG
 
+## 0.10.2
+
+- Add inputs to allow Trivy failing: trivy_failable
+- Add inputs to allow Hadolint failing: hadolint_failable
+
+## 0.10.1
+
+- Enable .trivyignore usage
+
+## 0.10.0
+
+- reusable_docker_pipeline: Add Trivy and Hadolint scanning
+
 ## 0.9.0
 
 - reusable_node_lint_test: Support publishing a package
