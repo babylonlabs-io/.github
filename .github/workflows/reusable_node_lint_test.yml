@@ -28,6 +28,10 @@ on:
         type: string
         required: false
         default: 'npm publish'
+      run-changesets:
+        description: 'Run Changesets Release Action'
+        type: boolean
+        default: false
 
 jobs:
   build:
@@ -56,6 +60,12 @@ jobs:
     - name: Build project
       if: ${{ inputs.run-build }}
       run: npm run build
+
+    - name: Create Release Pull Request
+      if: ${{ inputs.run-changesets }}
+      uses: changesets/action@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Publish package
       if: ${{ inputs.publish }}
