@@ -45,6 +45,7 @@ on:
         type: boolean
         description: 'Ignore Trivy failures'
         default: true
+
 jobs:
   prepare-metadata:
     runs-on: ubuntu-24.04
