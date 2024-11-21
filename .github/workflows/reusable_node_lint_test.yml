@@ -32,6 +32,10 @@ on:
         description: 'Run Changesets Release Action'
         type: boolean
         default: false
+      run-changesets-version-check:
+        description: 'Run Changesets Version Check'
+        type: boolean
+        default: false
 
 jobs:
   build:
@@ -66,6 +70,18 @@ jobs:
       uses: changesets/action@v1
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    
+    - name: Run Changesets Version Check
+      if: ${{ inputs.run-changesets-version-check }}
+      run: |
+        git fetch origin main
+        if [ -n "$(git diff HEAD origin/main -- package.json | grep '"version":')" ]; then
+          echo "Version change detected"
+          echo "//registry.npmjs.org/:_authToken=${{ secrets.NPM_TOKEN }}" > .npmrc
+          ${{ inputs.publish-command }}
+        else
+          echo "No version change detected"
+        fi
 
     - name: Publish package
       if: ${{ inputs.publish }}
