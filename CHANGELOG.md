@@ -1,5 +1,10 @@
 # CHANGELOG
 
+
+## 0.11.0
+
+- reusable_node_lint_test: Support changesets release action
+ 
 ## 0.10.2
 
 - Add inputs to allow Trivy failing: trivy_failable
