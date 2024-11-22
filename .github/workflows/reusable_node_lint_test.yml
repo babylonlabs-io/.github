@@ -38,6 +38,13 @@ jobs:
     runs-on: ubuntu-24.04
 
     steps:
+    - name: Validate Inputs
+      run: |
+        if [ "${{ inputs.publish }}" = "true" ] && [ "${{ inputs.run-changesets }}" = "true" ]; then
+          echo "Error: Both 'publish' and 'run-changesets' cannot be true at the same time."
+          exit 1
+        fi
+
     - name: Checkout repository
       uses: actions/checkout@v4
 
@@ -64,8 +71,11 @@ jobs:
     - name: Create Release Pull Request
       if: ${{ inputs.run-changesets }}
       uses: changesets/action@v1
+      with:
+        publish: ${{ inputs.publish-command }}
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
 
     - name: Publish package
       if: ${{ inputs.publish }}
