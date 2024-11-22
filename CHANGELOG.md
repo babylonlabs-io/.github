@@ -1,5 +1,9 @@
 # CHANGELOG
 
+## 0.11.1
+
+- Bugfix: reusable_node_lint_test: Use changesets action to create pull request for release
+- Bugfix: reusable_node_lint_test: Fix bug where both publish and run-changesets cannot be true
 
 ## 0.11.0
 
