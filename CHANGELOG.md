@@ -1,5 +1,9 @@
 # CHANGELOG
 
+## 0.11.2
+
+- reusable_docker_pipeline: Fix bug where a repo has both docker build workflow runs at the same time
+
 ## 0.11.1
 
 - Bugfix: reusable_node_lint_test: Use changesets action to create pull request for release
