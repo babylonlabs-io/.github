@@ -45,6 +45,10 @@ on:
         type: boolean
         description: 'Ignore Trivy failures'
         default: true
+      buildArgs:
+        description: 'Build arguments'
+        required: false
+        type: string
 
 jobs:
   prepare-metadata:
@@ -150,6 +154,7 @@ jobs:
           platforms: ${{ matrix.platform }}
           context: ${{ inputs.dockerContext }}
           file: ${{ inputs.dockerfile }}
+          build-args: ${{ inputs.buildArgs }}
           outputs: type=image,name=${{ vars.DOCKERHUB_REGISTRY_ID || 'babylonlabs' }}/${{ needs.prepare-metadata.outputs.image-name }},push-by-digest=true,push=${{ inputs.publish }}
 
       - name: Build and push to ECR
@@ -159,6 +164,7 @@ jobs:
           platforms: ${{ matrix.platform }}
           context: ${{ inputs.dockerContext }}
           file: ${{ inputs.dockerfile }}
+          build-args: ${{ inputs.buildArgs }}
           outputs: type=image,name=${{ vars.AWS_ECR_REGISTRY_ID || 'babylonlabs' }}/${{ needs.prepare-metadata.outputs.image-name }},push-by-digest=true,push=${{ inputs.publish }}
       
       - name: Export digest Docker Hub
