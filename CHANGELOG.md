@@ -1,5 +1,10 @@
 # CHANGELOG
 
+## 0.12.0
+
+- reusable_docker_pipeline: Support custom image tag
+- reusable_docker_pipeline: Support build-args
+
 ## 0.11.2
 
 - reusable_docker_pipeline: Fix bug where a repo has both docker build workflow runs at the same time
