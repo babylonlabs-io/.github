@@ -35,7 +35,7 @@ jobs:
           target_branch=${{ inputs.target_branch }}
 
           echo "Checking for commits in $base_branch that are not in $target_branch..."
-          
+
           new_commits=$(git log origin/$base_branch --not origin/$target_branch --oneline)
 
           if [ -z "$new_commits" ]; then
@@ -46,7 +46,7 @@ jobs:
             echo "$new_commits"
             echo "no_diff=false" >> $GITHUB_ENV
           fi
-      
+
       - name: Check for existing PR and create if not exists
         if: env.no_diff == 'false'
         run: |
@@ -66,7 +66,7 @@ jobs:
             --body "This PR synchronizes changes from $base_branch to $target_branch." \
             --repo "$repo" \
             --reviewer "$reviewers"
-            
+
             echo "Pull request created successfully."
           fi
         env:

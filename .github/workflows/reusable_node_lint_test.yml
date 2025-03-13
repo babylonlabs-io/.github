@@ -55,7 +55,7 @@ jobs:
 
     - name: Install dependencies
       run: npm install
-    
+
     - name: Run Lint
       if: ${{ inputs.run-lint }}
       run: npm run lint

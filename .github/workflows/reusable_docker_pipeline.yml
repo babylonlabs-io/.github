@@ -90,11 +90,11 @@ jobs:
       uses: github/codeql-action/upload-sarif@v3
       if: always()
       with:
-        sarif_file: hadolint-result.sarif     
+        sarif_file: hadolint-result.sarif
 
   docker_build:
     runs-on: ${{ matrix.runner }}
-    needs: 
+    needs:
       - prepare-metadata
       - dockerfile_lint
     strategy:
@@ -116,7 +116,7 @@ jobs:
         run: |
           platform=${{ matrix.platform }}
           echo "PLATFORM_PAIR=${platform//\//-}" >> $GITHUB_ENV
-  
+
       - name: Checkout repository
         uses: actions/checkout@v4
 
@@ -132,14 +132,14 @@ jobs:
 
       - name: Login to ECR
         uses: docker/login-action@v3
-        if: inputs.publish 
+        if: inputs.publish
         with:
           registry: ${{ vars.AWS_ECR_REGISTRY_ID }}
           username: ${{ secrets.AWS_ACCESS_KEY_ID }}
           password: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
 
       # This block is used to not hard-coded the secrets in Build Docker image
-      # Secrets are only added when necessary 
+      # Secrets are only added when necessary
       - name: Generate and mask build secrets
         id: set-build-secrets
         run: |
@@ -172,14 +172,14 @@ jobs:
           file: ${{ inputs.dockerfile }}
           build-args: ${{ inputs.buildArgs }}
           outputs: type=image,name=${{ vars.AWS_ECR_REGISTRY_ID || 'babylonlabs' }}/${{ needs.prepare-metadata.outputs.image-name }},push-by-digest=true,push=${{ inputs.publish }}
-      
+
       - name: Export digest Docker Hub
         if: inputs.publish
         run: |
           mkdir -p /tmp/digests/dockerhub
           digest="${{ steps.build-dockerhub.outputs.digest }}"
           echo "$digest" > "/tmp/digests/dockerhub/${digest#sha256:}"
-        
+
       - name: Export digest ECR
         if: inputs.publish
         run: |
@@ -220,10 +220,10 @@ jobs:
           path: /tmp/digests
           pattern: digests-dockerhub-${{ needs.prepare-metadata.outputs.image-name }}-*
           merge-multiple: true
-      
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
-      
+
       - name: Docker meta
         id: meta
         uses: docker/metadata-action@v5
@@ -233,20 +233,20 @@ jobs:
             type=sha,enable=true,priority=100,prefix=,suffix=,format=long
             type=ref,enable=true,priority=200,prefix=,suffix=,event=tag
             type=raw,enable=${{ !!inputs.imageTag }},priority=300,value=${{ inputs.imageTag }}
-      
+
       - name: Login to Docker Hub
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-      
+
       - name: Create manifest list and push
         working-directory: /tmp/digests
         run: |
           tags=$(jq -cr '.tags | map("-t " + .) | join(" ")'  <<< "$DOCKER_METADATA_OUTPUT_JSON")
           digests=$(printf "${{ vars.DOCKERHUB_REGISTRY_ID }}/${{ needs.prepare-metadata.outputs.image-name }}@sha256:%s " $(ls /tmp/digests))
           docker buildx imagetools create $tags $digests
-      
+
       - name: Inspect image
         run: |
           docker buildx imagetools inspect ${{ vars.DOCKERHUB_REGISTRY_ID }}/${{ needs.prepare-metadata.outputs.image-name }}:${{ steps.meta.outputs.version }}
@@ -264,10 +264,10 @@ jobs:
           path: /tmp/digests
           pattern: digests-ecr-${{ needs.prepare-metadata.outputs.image-name }}-*
           merge-multiple: true
-      
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
-      
+
       - name: Docker meta
         id: meta
         uses: docker/metadata-action@v5
@@ -276,21 +276,21 @@ jobs:
           tags: |
             type=sha,enable=true,priority=100,prefix=,suffix=,format=long
             type=ref,enable=true,priority=200,prefix=,suffix=,event=tag
-      
+
       - name: Login to ECR
         uses: docker/login-action@v3
         with:
           registry: ${{ vars.AWS_ECR_REGISTRY_ID }}
           username: ${{ secrets.AWS_ACCESS_KEY_ID }}
           password: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-      
+
       - name: Create manifest list and push
         working-directory: /tmp/digests/
         run: |
           tags=$(jq -cr '.tags | map("-t " + .) | join(" ")'  <<< "$DOCKER_METADATA_OUTPUT_JSON")
           digests=$(printf "${{ vars.AWS_ECR_REGISTRY_ID }}/${{ needs.prepare-metadata.outputs.image-name }}@sha256:%s " $(ls /tmp/digests))
           docker buildx imagetools create $tags $digests
-      
+
       - name: Inspect image
         run: |
           docker buildx imagetools inspect ${{ vars.AWS_ECR_REGISTRY_ID }}/${{ needs.prepare-metadata.outputs.image-name }}:${{ steps.meta.outputs.version }}
@@ -311,11 +311,11 @@ jobs:
         format: sarif
         output: trivy-results.sarif
         vulnerability:
-          ignore-unfixed: true  
-          type: 
+          ignore-unfixed: true
+          type:
             - os
             - library
-        severity: 
+        severity:
           - CRITICAL
           - HIGH
           - MEDIUM
@@ -325,9 +325,9 @@ jobs:
 
     - name: Determine if we should fail the pipeline when Vulnerability found
       run: |
-        if [[ "${{ inputs.trivy_nofail }}" == "false" ]]; then 
+        if [[ "${{ inputs.trivy_nofail }}" == "false" ]]; then
           echo "exit-code: '1'" >> /tmp/trivy.yaml; else
-          echo "exit-code: '0'" >> /tmp/trivy.yaml; 
+          echo "exit-code: '0'" >> /tmp/trivy.yaml;
         fi
 
     - name: Run Trivy vulnerability scanner - Without ignore
