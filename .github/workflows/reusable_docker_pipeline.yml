@@ -31,6 +31,11 @@ on:
         description: 'Build arguments for Docker'
         required: false
         default: ""
+      buildArtifactPrefix:
+        type: string
+        description: 'Build artifact prefix'
+        required: false
+        default: ""
       go-private-repos-authentication:
         description: 'Enable authentication for private repositories'
         type: boolean
@@ -191,7 +196,7 @@ jobs:
         if: inputs.publish
         uses: actions/upload-artifact@v4
         with:
-          name: digests-dockerhub-${{ needs.prepare-metadata.outputs.image-name }}-${{ inputs.imageTag }}-${{ env.PLATFORM_PAIR }}
+          name: ${{ inputs.buildArtifactPrefix }}digests-dockerhub-${{ needs.prepare-metadata.outputs.image-name }}-${{ env.PLATFORM_PAIR }}
           path: /tmp/digests/dockerhub/*
           if-no-files-found: error
           retention-days: 1
@@ -200,7 +205,7 @@ jobs:
         if: inputs.publish
         uses: actions/upload-artifact@v4
         with:
-          name: digests-ecr-${{ needs.prepare-metadata.outputs.image-name }}-${{ inputs.imageTag }}-${{ env.PLATFORM_PAIR }}
+          name: ${{ inputs.buildArtifactPrefix }}digests-ecr-${{ needs.prepare-metadata.outputs.image-name }}-${{ env.PLATFORM_PAIR }}
           path: /tmp/digests/ecr/*
           if-no-files-found: error
           retention-days: 1
@@ -218,7 +223,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: /tmp/digests
-          pattern: digests-dockerhub-${{ needs.prepare-metadata.outputs.image-name }}-${{ inputs.imageTag }}-*
+          pattern: ${{ inputs.buildArtifactPrefix }}digests-dockerhub-${{ needs.prepare-metadata.outputs.image-name }}-*
           merge-multiple: true
 
       - name: Set up Docker Buildx
@@ -262,7 +267,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: /tmp/digests
-          pattern: digests-ecr-${{ needs.prepare-metadata.outputs.image-name }}-${{ inputs.imageTag }}-*
+          pattern: ${{ inputs.buildArtifactPrefix }}digests-ecr-${{ needs.prepare-metadata.outputs.image-name }}-*
           merge-multiple: true
 
       - name: Set up Docker Buildx
