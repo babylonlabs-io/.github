@@ -191,7 +191,7 @@ jobs:
         if: inputs.publish
         uses: actions/upload-artifact@v4
         with:
-          name: digests-dockerhub-${{ needs.prepare-metadata.outputs.image-name }}-${{ env.PLATFORM_PAIR }}-${{ github.run_id }}
+          name: digests-dockerhub-${{ needs.prepare-metadata.outputs.image-name }}-${{ github.run_id }}-${{ env.PLATFORM_PAIR }}
           path: /tmp/digests/dockerhub/*
           if-no-files-found: error
           retention-days: 1
@@ -200,7 +200,7 @@ jobs:
         if: inputs.publish
         uses: actions/upload-artifact@v4
         with:
-          name: digests-ecr-${{ needs.prepare-metadata.outputs.image-name }}-${{ env.PLATFORM_PAIR }}-${{ github.run_id }}
+          name: digests-ecr-${{ needs.prepare-metadata.outputs.image-name }}-${{ github.run_id }}-${{ env.PLATFORM_PAIR }}
           path: /tmp/digests/ecr/*
           if-no-files-found: error
           retention-days: 1
@@ -218,7 +218,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: /tmp/digests
-          pattern: digests-dockerhub-${{ needs.prepare-metadata.outputs.image-name }}-${{ env.PLATFORM_PAIR }}-${{ github.run_id }}-*
+          pattern: digests-dockerhub-${{ needs.prepare-metadata.outputs.image-name }}-${{ github.run_id }}-*
           merge-multiple: true
 
       - name: Set up Docker Buildx
@@ -262,7 +262,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: /tmp/digests
-          pattern: digests-ecr-${{ needs.prepare-metadata.outputs.image-name }}-${{ env.PLATFORM_PAIR }}-${{ github.run_id }}-*
+          pattern: digests-ecr-${{ needs.prepare-metadata.outputs.image-name }}-${{ github.run_id }}-*
           merge-multiple: true
 
       - name: Set up Docker Buildx
