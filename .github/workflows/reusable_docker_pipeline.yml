@@ -281,6 +281,7 @@ jobs:
           tags: |
             type=sha,enable=true,priority=100,prefix=,suffix=,format=long
             type=ref,enable=true,priority=200,prefix=,suffix=,event=tag
+            type=raw,enable=${{ !!inputs.imageTag }},priority=300,value=${{ inputs.imageTag }}
 
       - name: Login to ECR
         uses: docker/login-action@v3
