@@ -31,6 +31,8 @@ on:
         description: 'Build arguments for Docker'
         required: false
         default: ""
+      # Only needed when there are 2 jobs calling to workflow at the same time
+      # e.g babylond repo has 2 jobs to build mainnet/testnet images
       buildArtifactPrefix:
         type: string
         description: 'Build artifact prefix'
