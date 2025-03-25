@@ -3,7 +3,7 @@
 ## 0.12.1
 
 - reusable_docker_pipeline: Add buildArtifactPrefix to prevent uploading to the same artifact
-- reusable_docker_pipeline: Only use one tag when publishing
+- reusable_docker_pipeline: Ignore other tag patterns when inputs.imageTag is available
   
 ## 0.12.0
 
