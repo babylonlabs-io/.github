@@ -236,7 +236,8 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ${{ vars.DOCKERHUB_REGISTRY_ID }}/${{ needs.prepare-metadata.outputs.image-name }}
-          # If inputs.imageTag is used, other tags will be ignored
+          # If inputs.imageTag is available, other tags will be ignored
+          # Priority only affects the order of tag generation, not which tag is chosen
           tags: |
             type=sha,enable=${{ !inputs.imageTag }},priority=100,prefix=,suffix=,format=long
             type=ref,enable=${{ !inputs.imageTag }},priority=200,prefix=,suffix=,event=tag
