@@ -235,8 +235,8 @@ jobs:
         with:
           images: ${{ vars.DOCKERHUB_REGISTRY_ID }}/${{ needs.prepare-metadata.outputs.image-name }}
           tags: |
-            type=sha,enable=${{ !inputs.imageTag }},priority=100,prefix=,suffix=,format=long
-            type=ref,enable=${{ !inputs.imageTag }},priority=200,prefix=,suffix=,event=tag
+            type=sha,enable=true,priority=100,prefix=,suffix=,format=long
+            type=ref,enable=true,priority=200,prefix=,suffix=,event=tag
             type=raw,enable=${{ !!inputs.imageTag }},priority=300,value=${{ inputs.imageTag }}
           only-single-tag: true
 
@@ -280,9 +280,10 @@ jobs:
         with:
           images: ${{ vars.AWS_ECR_REGISTRY_ID }}/${{ needs.prepare-metadata.outputs.image-name }}
           tags: |
-            type=sha,enable=${{ !inputs.imageTag }},priority=100,prefix=,suffix=,format=long
-            type=ref,enable=${{ !inputs.imageTag }},priority=200,prefix=,suffix=,event=tag
+            type=sha,enable=true,priority=100,prefix=,suffix=,format=long
+            type=ref,enable=true,priority=200,prefix=,suffix=,event=tag
             type=raw,enable=${{ !!inputs.imageTag }},priority=300,value=${{ inputs.imageTag }}
+          only-single-tag: true
 
       - name: Login to ECR
         uses: docker/login-action@v3
