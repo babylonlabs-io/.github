@@ -2,7 +2,8 @@
 
 ## 0.12.1
 
-- reusable_docker_pipeline: Add github_id to prevent uploading to the same artifact
+- reusable_docker_pipeline: Add buildArtifactPrefix to prevent uploading to the same artifact
+- reusable_docker_pipeline: Only use one tag when publishing
   
 ## 0.12.0
 
