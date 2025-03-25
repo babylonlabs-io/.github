@@ -249,7 +249,7 @@ jobs:
       - name: Create manifest list and push
         working-directory: /tmp/digests
         run: |
-          tags=$(jq -cr '.tags | map("-t " + .) | join(" ")'  <<< "$DOCKER_METADATA_OUTPUT_JSON")
+          tags=$(jq -cr '.tags | first | "-t " + .' <<< "$DOCKER_METADATA_OUTPUT_JSON")
           digests=$(printf "${{ vars.DOCKERHUB_REGISTRY_ID }}/${{ needs.prepare-metadata.outputs.image-name }}@sha256:%s " $(ls /tmp/digests))
           docker buildx imagetools create $tags $digests
 
@@ -295,7 +295,7 @@ jobs:
       - name: Create manifest list and push
         working-directory: /tmp/digests/
         run: |
-          tags=$(jq -cr '.tags | map("-t " + .) | join(" ")'  <<< "$DOCKER_METADATA_OUTPUT_JSON")
+          tags=$(jq -cr '.tags | first | "-t " + .' <<< "$DOCKER_METADATA_OUTPUT_JSON")
           digests=$(printf "${{ vars.AWS_ECR_REGISTRY_ID }}/${{ needs.prepare-metadata.outputs.image-name }}@sha256:%s " $(ls /tmp/digests))
           docker buildx imagetools create $tags $digests
 
