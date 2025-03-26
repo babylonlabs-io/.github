@@ -31,6 +31,13 @@ on:
         description: 'Build arguments for Docker'
         required: false
         default: ""
+      # Only needed when there are 2 jobs calling to workflow at the same time
+      # e.g babylond repo has 2 jobs to build mainnet/testnet images
+      buildArtifactPrefix:
+        type: string
+        description: 'Build artifact prefix'
+        required: false
+        default: ""
       go-private-repos-authentication:
         description: 'Enable authentication for private repositories'
         type: boolean
@@ -191,7 +198,7 @@ jobs:
         if: inputs.publish
         uses: actions/upload-artifact@v4
         with:
-          name: digests-dockerhub-${{ needs.prepare-metadata.outputs.image-name }}-${{ env.PLATFORM_PAIR }}
+          name: ${{ inputs.buildArtifactPrefix }}digests-dockerhub-${{ needs.prepare-metadata.outputs.image-name }}-${{ env.PLATFORM_PAIR }}
           path: /tmp/digests/dockerhub/*
           if-no-files-found: error
           retention-days: 1
@@ -200,7 +207,7 @@ jobs:
         if: inputs.publish
         uses: actions/upload-artifact@v4
         with:
-          name: digests-ecr-${{ needs.prepare-metadata.outputs.image-name }}-${{ env.PLATFORM_PAIR }}
+          name: ${{ inputs.buildArtifactPrefix }}digests-ecr-${{ needs.prepare-metadata.outputs.image-name }}-${{ env.PLATFORM_PAIR }}
           path: /tmp/digests/ecr/*
           if-no-files-found: error
           retention-days: 1
@@ -218,7 +225,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: /tmp/digests
-          pattern: digests-dockerhub-${{ needs.prepare-metadata.outputs.image-name }}-*
+          pattern: ${{ inputs.buildArtifactPrefix }}digests-dockerhub-${{ needs.prepare-metadata.outputs.image-name }}-*
           merge-multiple: true
 
       - name: Set up Docker Buildx
@@ -229,9 +236,11 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ${{ vars.DOCKERHUB_REGISTRY_ID }}/${{ needs.prepare-metadata.outputs.image-name }}
+          # If inputs.imageTag is available, other tags will be ignored
+          # Priority only affects the order of tag generation, not which tag is chosen
           tags: |
-            type=sha,enable=true,priority=100,prefix=,suffix=,format=long
-            type=ref,enable=true,priority=200,prefix=,suffix=,event=tag
+            type=sha,enable=${{ !inputs.imageTag }},priority=100,prefix=,suffix=,format=long
+            type=ref,enable=${{ !inputs.imageTag }},priority=200,prefix=,suffix=,event=tag
             type=raw,enable=${{ !!inputs.imageTag }},priority=300,value=${{ inputs.imageTag }}
 
       - name: Login to Docker Hub
@@ -262,7 +271,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: /tmp/digests
-          pattern: digests-ecr-${{ needs.prepare-metadata.outputs.image-name }}-*
+          pattern: ${{ inputs.buildArtifactPrefix }}digests-ecr-${{ needs.prepare-metadata.outputs.image-name }}-*
           merge-multiple: true
 
       - name: Set up Docker Buildx
@@ -274,8 +283,9 @@ jobs:
         with:
           images: ${{ vars.AWS_ECR_REGISTRY_ID }}/${{ needs.prepare-metadata.outputs.image-name }}
           tags: |
-            type=sha,enable=true,priority=100,prefix=,suffix=,format=long
-            type=ref,enable=true,priority=200,prefix=,suffix=,event=tag
+            type=sha,enable=${{ !inputs.imageTag }},priority=100,prefix=,suffix=,format=long
+            type=ref,enable=${{ !inputs.imageTag }},priority=200,prefix=,suffix=,event=tag
+            type=raw,enable=${{ !!inputs.imageTag }},priority=300,value=${{ inputs.imageTag }}
 
       - name: Login to ECR
         uses: docker/login-action@v3
