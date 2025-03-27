@@ -1,0 +1,130 @@
+name: Reusable Release Workflow
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: 'Release tag'
+        required: true
+        type: string
+      description:
+        description: 'Release description'
+        required: true
+        type: string
+      prerelease:
+        description: 'Whether prerelease is enabled'
+        required: true
+        type: boolean
+      changelog_path:
+        description: 'Path to changelog file'
+        required: true
+        type: string
+      build_from_source:
+        description: 'Build from source'
+        required: false
+        type: boolean
+        default: false
+      build_command:
+        description: 'Command to build from source'
+        required: false
+        type: string
+      support_docker_image:
+        description: 'Whether the release supports docker image'
+        required: false
+        type: boolean
+        default: false
+      docker_image_name:
+        description: 'Full Docker image reference'
+        required: false
+        type: string
+        default: ''
+      docker_image_table_template:
+        description: 'Template for the Docker image section'
+        required: false
+        type: string
+      dependencies_enabled:
+        description: 'Include dependencies section'
+        required: false
+        type: boolean
+        default: false
+      dependencies:
+        description: 'List of dependencies'
+        required: false
+        type: string
+        default: 'Depends on [Babylon v1.0.0-rc.6-fix](https://github.com/babylonlabs-io/babylon/releases/tag/v1.0.0-rc.6-fix)'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generate base release notes
+        run: |
+          tee release_notes.md <<EOF
+          # 🚀 Overview
+          
+          ${{ inputs.description }}
+          
+          # 📜 Changelog
+          You can read the whole changelog [here](${{ inputs.changelog_path }})
+          EOF
+
+      - name: Append Build from Source section (if enabled)
+        if: inputs.build_from_source
+        run: |
+          tee -a release_notes.md <<EOF
+
+          # 🏗️ Binaries
+
+          If you prefer to build from source, use the following commands:
+
+          \`\`\`sh
+          git pull
+          git checkout ${{ inputs.tag }}
+          ${{ inputs.build_command }}
+          \`\`\`
+          EOF
+
+      - name: Append Docker Image section (if provided)
+        if: inputs.support_docker_image
+        run: |
+          if [[ -z "${{ inputs.docker_image_table_template }}" ]]; then
+            tee -a release_notes.md <<EOF
+          
+          # 🐳 Docker Image
+          
+          | Image | Description |
+          |---------------|----------------|
+          | \`${{ inputs.docker_image_name }}\` | Official release image |
+          EOF
+          else
+            tee -a release_notes.md <<EOF
+          # 🐳 Docker Image
+          ${{ inputs.docker_image_table_template }}
+          EOF
+          fi
+
+      - name: Append Dependencies (if enabled)
+        if: inputs.dependencies_enabled
+        run: |
+          tee -a release_notes.md <<EOF
+
+          # 📦 Dependencies
+
+          ${{ inputs.dependencies }}
+          EOF
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.tag }}
+          name: ${{ inputs.tag }}
+          body_path: release_notes.md
+          draft: false
+          prerelease: ${{ inputs.prerelease }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
