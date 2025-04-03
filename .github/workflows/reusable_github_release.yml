@@ -62,46 +62,18 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Install git-chglog
+      - name: Install git-cliff
         run: |
-          curl -sSL https://github.com/git-chglog/git-chglog/releases/download/v0.15.0/git-chglog_0.15.0_linux_amd64.tar.gz | tar xz
-          sudo mv git-chglog /usr/local/bin/
-      - name: Generate Default Config for git-chglog
-        run: |
-          # Create a default configuration for git-chglog
-          cat <<EOL > config.yml
-          next_tag: v{{next_version}}
-          previous_tag: v{{previous_version}}
-          compare_link: https://github.com/{{user}}/{{repo}}/compare/{{previous_tag}}...{{next_tag}}
-          changelog_header: |
-            {{.NextTag}} - {{.Date}}
-            =========================
-            {{.Body}}
+          sudo apt update && sudo apt install -y cargo
+          cargo install git-cliff
 
-          sections:
-            - title: Added
-              labels:
-                - "enhancement"
-            - title: Fixed
-              labels:
-                - "bug"
-            - title: Changed
-              labels:
-                - "feature"
-            - title: Deprecated
-              labels:
-                - "deprecated"
-            - title: Removed
-              labels:
-                - "removed"
-            - title: Security
-              labels:
-                - "security"
-          EOL
-
-      - name: Generate Changelog Automatically with git-chglog
+      - name: Initialize git-cliff configuration
         run: |
-          git-chglog -o auto_changelog.md -c config.yml
+          git-cliff --init
+          
+      - name: Generate Changelog Automatically with git-cliff
+        run: |
+          git-cliff -o CHANGELOG.md
 
       - name: Set Changelog Output
         id: set-changelog
