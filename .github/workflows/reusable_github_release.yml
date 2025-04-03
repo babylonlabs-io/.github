@@ -80,6 +80,11 @@ jobs:
         run: |
           git-cliff -o CHANGELOG.md
 
+      - name: Print Generated Changelog to Logs
+        run: |
+          echo "Generated Changelog:"
+          cat CHANGELOG.md
+
       - name: Set Changelog Output
         id: set-changelog
         run: |
