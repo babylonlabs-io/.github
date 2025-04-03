@@ -70,7 +70,7 @@ jobs:
           ${{ inputs.description }}
           
           # 📜 Changelog
-          You can read the whole changelog [here](${{ inputs.changelog_path }})
+          You can view the complete changelog [here](${{ inputs.changelog_path }})
           EOF
 
       - name: Append Build from Source section (if enabled)
@@ -128,5 +128,6 @@ jobs:
           draft: false
           prerelease: ${{ inputs.prerelease }}
           generate_release_notes: true
+          append_body: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
