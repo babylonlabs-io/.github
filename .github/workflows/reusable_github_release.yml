@@ -83,7 +83,8 @@ jobs:
           If you prefer to build from source, use the following commands:
 
           \`\`\`sh
-          git pull
+          git clone https://github.com/${{ github.repository }}.git
+          cd $(basename ${{ github.repository }})
           git checkout ${{ inputs.tag }}
           ${{ inputs.build_command }}
           \`\`\`
