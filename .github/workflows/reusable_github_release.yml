@@ -107,7 +107,7 @@ jobs:
           You can view the complete changelog [here](${{ inputs.changelog_path }})
 
           Auto generated:
-          ${{ needs.generate-changelog.outputs.changelog_content }}
+          ${{ needs.generate-changelog.outputs.content }}
           EOF
 
       - name: Append Build from Source section (if enabled)
