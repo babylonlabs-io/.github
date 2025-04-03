@@ -62,10 +62,10 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Install git-cliff
+      - name: Install git-cliff (Prebuilt Binary)
         run: |
-          sudo apt update && sudo apt install -y cargo
-          cargo install git-cliff
+          curl -sSL https://github.com/orhun/git-cliff/releases/latest/download/git-cliff-linux-x86_64.tar.gz | tar -xz
+          sudo mv git-cliff /usr/local/bin/
 
       - name: Initialize git-cliff configuration
         run: |
@@ -78,7 +78,7 @@ jobs:
       - name: Set Changelog Output
         id: set-changelog
         run: |
-          content=$(cat auto_changelog.md)
+          content=$(cat CHANGELOG.md)
           echo "content<<EOF" >> $GITHUB_ENV
           echo "$content" >> $GITHUB_ENV
           echo "EOF" >> $GITHUB_ENV
