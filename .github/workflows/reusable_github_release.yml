@@ -69,7 +69,7 @@ jobs:
       - name: Generate Default Config for git-chglog
         run: |
           # Create a default configuration for git-chglog
-          cat <<EOL > .chglog/config.yml
+          cat <<EOL > config.yml
           next_tag: v{{next_version}}
           previous_tag: v{{previous_version}}
           compare_link: https://github.com/{{user}}/{{repo}}/compare/{{previous_tag}}...{{next_tag}}
@@ -101,7 +101,7 @@ jobs:
 
       - name: Generate Changelog Automatically with git-chglog
         run: |
-          git-chglog -o auto_changelog.md
+          git-chglog -o auto_changelog.md -c config.yml
 
       - name: Set Changelog Output
         id: set-changelog
