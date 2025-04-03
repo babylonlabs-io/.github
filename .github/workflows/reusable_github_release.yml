@@ -62,16 +62,13 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Install dependencies
+      - name: Install git-chglog
         run: |
-          sudo apt-get update
-          sudo apt-get install -y ruby ruby-dev build-essential
-          gem install github_changelog_generator --user-install
-
-      - name: Generate Changelog Automatically with GitHub Changelog Generator
+          curl -sSL https://github.com/git-chglog/git-chglog/releases/download/v0.15.0/git-chglog_0.15.0_linux_amd64.tar.gz | tar xz
+          sudo mv git-chglog /usr/local/bin/
+      - name: Generate Changelog Automatically with git-chglog
         run: |
-          export PATH="$HOME/.gem/ruby/3.2.0/bin:$PATH"
-          github_changelog_generator --user ${{ github.repository_owner }} --project ${{ github.event.repository.name }} --output auto_changelog.md --release-issues --tags
+          git-chglog -o auto_changelog.md
 
       - name: Set Changelog Output
         id: set-changelog
