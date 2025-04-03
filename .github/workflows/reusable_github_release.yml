@@ -68,7 +68,7 @@ jobs:
           sudo mv git-chglog /usr/local/bin/
       - name: Generate Changelog Automatically with git-chglog
         run: |
-          git-chglog -o auto_changelog.md
+          git-chglog --no-config -o auto_changelog.md
 
       - name: Set Changelog Output
         id: set-changelog
