@@ -54,8 +54,34 @@ on:
         default: 'Depends on [Babylon v1.0.0-rc.6-fix](https://github.com/babylonlabs-io/babylon/releases/tag/v1.0.0-rc.6-fix)'
 
 jobs:
+  generate-changelog:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ruby ruby-dev build-essential
+          gem install github_changelog_generator
+
+      - name: Generate Changelog Automatically with GitHub Changelog Generator
+        run: |
+          github_changelog_generator --user ${{ github.repository_owner }} --project ${{ github.event.repository.name }} --output auto_changelog.md --release-issues --tags
+
+      - name: Set Changelog Output
+        id: set-changelog
+        run: |
+          content=$(cat auto_changelog.md)
+          echo "content<<EOF" >> $GITHUB_ENV
+          echo "$content" >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
   release:
     runs-on: ubuntu-latest
+    needs: generate-changelog
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -71,6 +97,9 @@ jobs:
           
           # 📜 Changelog
           You can view the complete changelog [here](${{ inputs.changelog_path }})
+
+          Auto generated:
+          ${{ needs.generate-changelog.outputs.changelog_content }}
           EOF
 
       - name: Append Build from Source section (if enabled)
