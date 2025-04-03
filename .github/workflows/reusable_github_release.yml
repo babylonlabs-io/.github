@@ -66,7 +66,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y ruby ruby-dev build-essential
-          gem install github_changelog_generator
+          gem install github_changelog_generator --user-install
 
       - name: Generate Changelog Automatically with GitHub Changelog Generator
         run: |
