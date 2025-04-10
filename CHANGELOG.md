@@ -1,5 +1,9 @@
 # CHANGELOG
 
+## 0.12.2
+
+- reusable_docker_pipeline: Disable latest tag
+  
 ## 0.12.1
 
 - reusable_docker_pipeline: Add buildArtifactPrefix to prevent uploading to the same artifact
