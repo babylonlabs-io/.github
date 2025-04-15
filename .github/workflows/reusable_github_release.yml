@@ -104,15 +104,12 @@ jobs:
           # 🚀 Overview
           
           ${{ inputs.description }}
-          EOF
 
-      - name: Append changelog
-        run: |
-          tee release_notes.md <<EOF
           # Changelog
           
           ${{ needs.generate-changelog.outputs.content }}
           EOF
+
       - name: Append Build from Source section (if enabled)
         if: inputs.build_from_source
         run: |
