@@ -20,11 +20,11 @@ on:
         required: true
         type: boolean
       changelog_path:
-        description: 'Path to changelog file'
+        description: 'Use to link to CHANGELOG.md'
         required: true
         type: string
-      build_from_source:
-        description: 'Whether the release supports build from source'
+      include_build_from_source_section:
+        description: 'Whether to include the build from source section in the release notes'
         required: false
         type: boolean
         default: false
@@ -32,8 +32,8 @@ on:
         description: 'Command to build from source'
         required: false
         type: string
-      support_docker_image:
-        description: 'Whether the release supports docker image'
+      include_docker_image_section:
+        description: 'Whether to include the docker image section in the release notes'
         required: false
         type: boolean
         default: false
@@ -46,12 +46,12 @@ on:
         description: 'Template for the Docker image section'
         required: false
         type: string
-      dependencies_enabled:
-        description: 'Include dependencies section'
+      include_dependencies_section:
+        description: 'Whether to include the dependencies section in the release notes'
         required: false
         type: boolean
         default: false
-      dependencies:
+      dependencies_template:
         description: 'List of dependencies'
         required: false
         type: string
@@ -111,7 +111,7 @@ jobs:
           EOF
 
       - name: Append Build from Source section (if enabled)
-        if: inputs.build_from_source
+        if: inputs.include_build_from_source_section
         run: |
           tee -a release_notes.md <<EOF
 
@@ -128,7 +128,7 @@ jobs:
           EOF
 
       - name: Append Docker Image section (if provided)
-        if: inputs.support_docker_image
+        if: inputs.include_docker_image_section
         run: |
           if [[ -z "${{ inputs.docker_image_table_template }}" ]]; then
             tee -a release_notes.md <<EOF
@@ -147,13 +147,13 @@ jobs:
           fi
 
       - name: Append Dependencies (if enabled)
-        if: inputs.dependencies_enabled
+        if: inputs.include_dependencies_section
         run: |
           tee -a release_notes.md <<EOF
 
           # 📦 Dependencies
 
-          ${{ inputs.dependencies }}
+          ${{ inputs.dependencies_template }}
           EOF
 
       - name: Create GitHub release
