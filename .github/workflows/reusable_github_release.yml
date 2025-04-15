@@ -66,6 +66,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: ${{ inputs.tag }}
       - name: Generate a changelog
         uses: orhun/git-cliff-action@v4
         if: inputs.auto_generated_changelog
@@ -97,7 +98,6 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          ref: ${{ inputs.tag }}
 
       - name: Generate base release notes
         run: |
