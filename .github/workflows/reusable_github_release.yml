@@ -4,7 +4,7 @@ on:
   workflow_call:
     inputs:
       tag:
-        description: 'Release tag'
+        description: 'Tag to release'
         required: true
         type: string
       description:
@@ -24,7 +24,7 @@ on:
         required: true
         type: string
       build_from_source:
-        description: 'Build from source'
+        description: 'Whether the release supports build from source'
         required: false
         type: boolean
         default: false
@@ -55,7 +55,6 @@ on:
         description: 'List of dependencies'
         required: false
         type: string
-        default: 'Depends on [Babylon v1.0.0-rc.6-fix](https://github.com/babylonlabs-io/babylon/releases/tag/v1.0.0-rc.6-fix)'
 
 jobs:
   generate-changelog:
