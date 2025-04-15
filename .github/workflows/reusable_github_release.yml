@@ -73,7 +73,7 @@ jobs:
         id: git-cliff
         with:
           config: cliff.toml
-          args: git cliff --current --strip all
+          args: --current --strip all
         env:
           OUTPUT: CHANGELOG.md
 
