@@ -82,6 +82,7 @@ jobs:
         run: |
           if [ "${{ inputs.auto_generated_changelog }}" = "true" ]; then
             echo "content<<EOF" >> $GITHUB_OUTPUT
+            echo "# Changelog" >> $GITHUB_OUTPUT
             echo "${{ needs.generate-changelog.outputs.content }}" >> $GITHUB_OUTPUT
             echo "EOF" >> $GITHUB_OUTPUT
           else
@@ -109,10 +110,7 @@ jobs:
 
       - name: Append changelog
         run: |
-          tee -a release_notes.md <<EOF
-          
-          ${{ needs.generate-changelog.outputs.content }}
-          EOF 
+           echo "${{ needs.generate-changelog.outputs.content }}" >> release_notes.md
       - name: Append Build from Source section (if enabled)
         if: inputs.build_from_source
         run: |
