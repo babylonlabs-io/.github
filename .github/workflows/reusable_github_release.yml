@@ -53,45 +53,26 @@ on:
         type: string
         default: 'Depends on [Babylon v1.0.0-rc.6-fix](https://github.com/babylonlabs-io/babylon/releases/tag/v1.0.0-rc.6-fix)'
 
-env:
-  GIT_CLIFF_VERSION: "2.8.0"
-
 jobs:
   generate-changelog:
     runs-on: ubuntu-latest
+    outputs:
+      content: ${{ steps.git-cliff.outputs.content }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Install git-cliff (Prebuilt Binary)
-        run: |
-          wget "https://github.com/orhun/git-cliff/releases/download/v${GIT_CLIFF_VERSION}/git-cliff-${GIT_CLIFF_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
-          tar -xzf "git-cliff-${GIT_CLIFF_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
-          sudo mv git-cliff-${GIT_CLIFF_VERSION}/git-cliff /usr/local/bin/
-          rm -rf git-cliff-${GIT_CLIFF_VERSION} "git-cliff-${GIT_CLIFF_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
+      - name: Generate a changelog
+        uses: orhun/git-cliff-action@v4
+        id: git-cliff
+        with:
+          config: cliff.toml
+          args: git cliff --latest --strip all
+        env:
+          OUTPUT: CHANGELOG.md
 
-      - name: Initialize git-cliff configuration
-        run: |
-          git-cliff --init
-          
-      - name: Generate Changelog Automatically with git-cliff
-        run: |
-          git-cliff -o CHANGELOG.md
-
-      - name: Print Generated Changelog to Logs
-        run: |
-          echo "Generated Changelog:"
-          cat CHANGELOG.md
-
-      - name: Set Changelog Output
-        id: set-changelog
-        run: |
-          content=$(cat CHANGELOG.md)
-          echo "content<<EOF" >> $GITHUB_ENV
-          echo "$content" >> $GITHUB_ENV
-          echo "EOF" >> $GITHUB_ENV
   release:
     runs-on: ubuntu-latest
     needs: generate-changelog
