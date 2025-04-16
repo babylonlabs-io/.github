@@ -32,6 +32,10 @@ on:
         description: 'Run Changesets Release Action'
         type: boolean
         default: false
+      use-semantic-release:
+        description: 'Use semantic-release to handle versioning and publishing'
+        type: boolean
+        default: false
 
 jobs:
   build:
@@ -44,9 +48,19 @@ jobs:
           echo "Error: Both 'publish' and 'run-changesets' cannot be true at the same time."
           exit 1
         fi
+        if [ "${{ inputs.publish }}" = "true" ] && [ "${{ inputs.use-semantic-release }}" = "true" ]; then
+          echo "Error: Cannot use both 'publish' and 'use-semantic-release' at the same time."
+          exit 1
+        fi
+        if [ "${{ inputs.run-changesets }}" = "true" ] && [ "${{ inputs.use-semantic-release }}" = "true" ]; then
+          echo "Error: Cannot use both 'run-changesets' and 'use-semantic-release' at the same time."
+          exit 1
+        fi
 
     - name: Checkout repository
       uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
 
     - name: Setup Node.js
       uses: actions/setup-node@v4
@@ -76,6 +90,13 @@ jobs:
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+    
+    - name: Run semantic-release
+      if: ${{ inputs.use-semantic-release }}
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+      run: npx semantic-release
 
     - name: Publish package
       if: ${{ inputs.publish }}
