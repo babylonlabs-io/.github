@@ -1,5 +1,9 @@
 # CHANGELOG
 
+## 0.13.0
+
+- Add reusable_github_release workflow
+
 ## 0.12.1
 
 - reusable_docker_pipeline: Add buildArtifactPrefix to prevent uploading to the same artifact
