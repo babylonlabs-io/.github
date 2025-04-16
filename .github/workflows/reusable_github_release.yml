@@ -84,7 +84,7 @@ jobs:
           EOF
 
       - name: Append Docker Image section (if enabled)
-        if: inputs.docker_image_name or inputs.docker_image_table_template
+        if: inputs.docker_image_name || inputs.docker_image_table_template
         run: |
           if [[ -z "${{ inputs.docker_image_table_template }}" ]]; then
             tee -a release_notes.md <<EOF
