@@ -16,7 +16,7 @@ on:
         required: true
         type: boolean
       changelog_path:
-        description: 'Use to link to CHANGELOG.md'
+        description: 'The filepath of the changelog file'
         required: false
         type: string
         default: ""
