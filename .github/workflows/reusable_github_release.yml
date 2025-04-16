@@ -15,8 +15,8 @@ on:
         description: 'Whether prerelease is enabled'
         required: true
         type: boolean
-      auto_generated_changelog:
-        description: 'Whether to use auto generated changelog'
+      include_changelog_section:
+        description: 'Whether to include the changelog section in the release notes'
         required: true
         type: boolean
       changelog_path:
@@ -57,46 +57,11 @@ on:
         type: string
 
 jobs:
-  generate-changelog:
-    runs-on: ubuntu-latest
-    outputs:
-      content: ${{ steps.git-cliff.outputs.content }}
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          ref: ${{ inputs.tag }}
-      - name: Generate a changelog
-        uses: orhun/git-cliff-action@v4
-        if: inputs.auto_generated_changelog
-        id: git-cliff
-        with:
-          config: cliff.toml
-          args: --current --strip all
-        env:
-          OUTPUT: CHANGELOG.md
-
-      - name: Set changelog output content
-        id: set-content
-        run: |
-          if [ "${{ inputs.auto_generated_changelog }}" = "true" ]; then
-            echo "content<<EOF" >> $GITHUB_OUTPUT
-            echo "${{ needs.generate-changelog.outputs.content }}" >> $GITHUB_OUTPUT
-            echo "EOF" >> $GITHUB_OUTPUT
-          else
-            echo "content<<EOF" >> $GITHUB_OUTPUT
-            echo "You can view the complete changelog [here](${{ inputs.changelog_path }})" >> $GITHUB_OUTPUT
-            echo "EOF" >> $GITHUB_OUTPUT
-          fi
   release:
-    runs-on: ubuntu-latest
-    needs: generate-changelog
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - name: Generate base release notes
         run: |
@@ -104,10 +69,16 @@ jobs:
           # 🚀 Overview
           
           ${{ inputs.description }}
+          EOF
+
+      - name: Append changelog section (if enabled)
+        if: inputs.include_changelog_section
+        run: |
+          tee release_notes.md <<EOF
 
           # Changelog
           
-          ${{ needs.generate-changelog.outputs.content }}
+          You can view the complete changelog [here](${{ inputs.changelog_path }})
           EOF
 
       - name: Append Build from Source section (if enabled)
@@ -127,7 +98,7 @@ jobs:
           \`\`\`
           EOF
 
-      - name: Append Docker Image section (if provided)
+      - name: Append Docker Image section (if enabled)
         if: inputs.include_docker_image_section
         run: |
           if [[ -z "${{ inputs.docker_image_table_template }}" ]]; then
