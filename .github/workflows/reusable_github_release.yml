@@ -74,7 +74,7 @@ jobs:
       - name: Append changelog section (if enabled)
         if: inputs.include_changelog_section
         run: |
-          tee release_notes.md <<EOF
+          tee -a release_notes.md <<EOF
 
           # Changelog
           
