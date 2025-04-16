@@ -76,7 +76,7 @@ jobs:
         run: |
           tee -a release_notes.md <<EOF
 
-          # Changelog
+          # 📄 Changelog
           
           You can view the complete changelog [here](${{ inputs.changelog_path }})
           EOF
