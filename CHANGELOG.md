@@ -1,5 +1,9 @@
 # CHANGELOG
 
+## 0.13.1
+
+- Support semantic release in the node reusable pipeline
+
 ## 0.13.0
 
 - Add reusable_github_release workflow
