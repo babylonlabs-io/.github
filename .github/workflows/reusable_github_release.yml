@@ -1,0 +1,124 @@
+name: Reusable Release Workflow
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: 'Tag to release'
+        required: true
+        type: string
+      description:
+        description: 'Release description'
+        required: true
+        type: string
+      prerelease:
+        description: 'Whether prerelease is enabled'
+        required: true
+        type: boolean
+      changelog_path:
+        description: 'The filepath of the changelog file'
+        required: false
+        type: string
+        default: ""
+      build_command:
+        description: 'Command to build from source'
+        required: false
+        type: string
+        default: ""
+      docker_image_name:
+        description: 'Full Docker image reference'
+        required: false
+        type: string
+        default: ""
+      docker_image_table_template:
+        description: 'Template for the Docker image section'
+        required: false
+        type: string
+        default: ""
+      dependencies_template:
+        description: 'List of dependencies'
+        required: false
+        type: string
+        default: ""
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Generate base release notes
+        run: |
+          tee release_notes.md <<EOF
+          # 🚀 Overview
+          
+          ${{ inputs.description }}
+          EOF
+
+      - name: Append changelog section (if enabled)
+        if: inputs.changelog_path
+        run: |
+          tee -a release_notes.md <<EOF
+
+          # 📄 Changelog
+          
+          You can view the complete changelog [here](${{ inputs.changelog_path }})
+          EOF
+
+      - name: Append Build from Source section (if enabled)
+        if: inputs.build_command
+        run: |
+          tee -a release_notes.md <<EOF
+
+          # 🏗️ Binaries
+
+          If you prefer to build from source, use the following commands:
+
+          \`\`\`sh
+          git clone https://github.com/${{ github.repository }}.git
+          cd $(basename ${{ github.repository }})
+          git checkout ${{ inputs.tag }}
+          ${{ inputs.build_command }}
+          \`\`\`
+          EOF
+
+      - name: Append Docker Image section (if enabled)
+        if: inputs.docker_image_name || inputs.docker_image_table_template
+        run: |
+          if [[ -z "${{ inputs.docker_image_table_template }}" ]]; then
+            tee -a release_notes.md <<EOF
+          
+          # 🐳 Docker Image
+          
+          | Image | Description |
+          |---------------|----------------|
+          | \`${{ inputs.docker_image_name }}\` | Official release image |
+          EOF
+          else
+            tee -a release_notes.md <<EOF
+          # 🐳 Docker Image
+          ${{ inputs.docker_image_table_template }}
+          EOF
+          fi
+
+      - name: Append Dependencies (if enabled)
+        if: inputs.dependencies_template
+        run: |
+          tee -a release_notes.md <<EOF
+
+          # 📦 Dependencies
+
+          ${{ inputs.dependencies_template }}
+          EOF
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.tag }}
+          name: ${{ inputs.tag }}
+          body_path: release_notes.md
+          draft: false
+          prerelease: ${{ inputs.prerelease }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
