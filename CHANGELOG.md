@@ -1,5 +1,9 @@
 # CHANGELOG
 
+## 0.13.2
+
+- reusable_docker_pipeline: Disable latest tag
+  
 ## 0.13.1
 
 - Support semantic release in the node reusable pipeline

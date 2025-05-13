@@ -282,6 +282,8 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ${{ vars.AWS_ECR_REGISTRY_ID }}/${{ needs.prepare-metadata.outputs.image-name }}
+          flavor: |
+            latest=false
           tags: |
             type=sha,enable=${{ !inputs.imageTag }},priority=100,prefix=,suffix=,format=long
             type=ref,enable=${{ !inputs.imageTag }},priority=200,prefix=,suffix=,event=tag
