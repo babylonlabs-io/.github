@@ -39,7 +39,7 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-24.04-8core
 
     steps:
     - name: Validate Inputs
