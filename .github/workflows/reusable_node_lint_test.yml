@@ -81,6 +81,8 @@ jobs:
     - name: Build project
       if: ${{ inputs.run-build }}
       run: npm run build
+      env:
+        NODE_OPTIONS: "--max-old-space-size=8192" # 8GB node memory limit
 
     - name: Create Release Pull Request
       if: ${{ inputs.run-changesets }}
