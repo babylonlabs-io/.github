@@ -19,6 +19,10 @@ on:
         description: 'Run npm build'
         type: boolean
         default: false
+      build-node-options:
+        required: false
+        type: string
+        default: ""
       publish:
         description: 'Publish npm package'
         type: boolean
@@ -82,7 +86,7 @@ jobs:
       if: ${{ inputs.run-build }}
       run: npm run build
       env:
-        NODE_OPTIONS: "--max-old-space-size=8192" # 8GB node memory limit
+        NODE_OPTIONS: ${{ inputs.build-node-options }}
 
     - name: Create Release Pull Request
       if: ${{ inputs.run-changesets }}
