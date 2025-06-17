@@ -6,7 +6,7 @@ on:
       node-version:
         description: 'Node version'
         type: string
-        default: '22.3'
+        default: '24.2'
       run-unit-tests:
         description: 'Run unit tests'
         type: boolean
