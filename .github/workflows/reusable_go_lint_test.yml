@@ -120,7 +120,7 @@ jobs:
         run: ${{ inputs.install-dependencies-command }}
 
       - name: Run Lint
-        uses: golangci/golangci-lint-action@v6
+        uses: golangci/golangci-lint-action@v7
         with:
           version: ${{ inputs.go-lint-version }}
           args: --timeout=10m
