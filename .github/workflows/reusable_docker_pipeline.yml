@@ -252,9 +252,12 @@ jobs:
       - name: Create manifest list and push
         working-directory: /tmp/digests
         run: |
-          tags=$(jq -cr '.tags | map("-t " + .) | join(" ")'  <<< "$DOCKER_METADATA_OUTPUT_JSON")
-          digests=$(printf "${{ vars.DOCKERHUB_REGISTRY_ID }}/${{ needs.prepare-metadata.outputs.image-name }}@sha256:%s " $(ls /tmp/digests))
-          docker buildx imagetools create $tags $digests
+          first_tag=$(jq -r '.tags[0] // empty' <<< "$DOCKER_METADATA_OUTPUT_JSON")
+          if [ -z "$first_tag" ]; then
+            echo "No tag found in DOCKER_METADATA_OUTPUT_JSON"; exit 1
+          fi
+          digests=$(printf "${{ vars.AWS_ECR_REGISTRY_ID }}/${{ needs.prepare-metadata.outputs.image-name }}@sha256:%s " $(ls /tmp/digests))
+          docker buildx imagetools create -t "$first_tag" $digests
 
       - name: Inspect image
         run: |
@@ -299,9 +302,12 @@ jobs:
       - name: Create manifest list and push
         working-directory: /tmp/digests/
         run: |
-          tags=$(jq -cr '.tags | map("-t " + .) | join(" ")'  <<< "$DOCKER_METADATA_OUTPUT_JSON")
+          first_tag=$(jq -r '.tags[0] // empty' <<< "$DOCKER_METADATA_OUTPUT_JSON")
+          if [ -z "$first_tag" ]; then
+            echo "No tag found in DOCKER_METADATA_OUTPUT_JSON"; exit 1
+          fi
           digests=$(printf "${{ vars.AWS_ECR_REGISTRY_ID }}/${{ needs.prepare-metadata.outputs.image-name }}@sha256:%s " $(ls /tmp/digests))
-          docker buildx imagetools create $tags $digests
+          docker buildx imagetools create -t "$first_tag" $digests
 
       - name: Inspect image
         run: |
