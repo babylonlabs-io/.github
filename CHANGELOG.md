@@ -1,5 +1,9 @@
 # CHANGELOG
 
+## 0.13.4
+
+- reusable_docker_pipeline: Publish only the tag with highest priority
+
 ## 0.13.2
 
 - reusable_docker_pipeline: Disable latest tag
