@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Add support for downloading/caching test file for unit tests
+- Add codeowners
 
 ## 0.13.4
 
