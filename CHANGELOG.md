@@ -1,5 +1,9 @@
 # CHANGELOG
 
+## Unreleased
+
+- Add support for downloading/caching test file for unit tests
+
 ## 0.13.4
 
 - reusable_docker_pipeline: Publish only the tag with highest priority
