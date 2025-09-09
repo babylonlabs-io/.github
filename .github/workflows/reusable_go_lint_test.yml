@@ -66,7 +66,7 @@ on:
         description: 'Optional path where the test data file for unit tests should be placed'
         required: false
         type: string
-        default: testdata.json        
+        default: testdata.json
 
 jobs:
   build:
@@ -149,7 +149,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ inputs.testdata-path }}
-          key: testdata-${{ hashFiles('.github/workflows/reusable_go_lint_test.yml') }}-${{ inputs.testdata-path }}
+          key: testdata-${{ inputs.testdata-url }}-${{ inputs.testdata-path }}
 
       # Download file if cache miss
       - name: Download test data (if cache miss)
