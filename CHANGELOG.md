@@ -2,7 +2,6 @@
 
 ## Unreleased
 
-- Add support for downloading/caching test file for unit tests
 - Add codeowners
 
 ## 0.13.4
@@ -65,6 +64,10 @@
 
 - reusable_docker_pipeline: Set default values for AWS_ECR_REGISTRY_ID and DOCKERHUB_REGISTRY_ID
 - add backport release pipeline
+
+## 0.7.1
+
+- Add support for downloading/caching test file for unit tests
 
 ## 0.7.0
 
