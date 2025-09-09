@@ -1,6 +1,6 @@
 # CHANGELOG
 
-## Unreleased
+## 0.7.1
 
 - Add support for downloading/caching test file for unit tests
 
