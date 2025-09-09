@@ -58,6 +58,15 @@ on:
         description: 'Enable authentication for private repositories'
         type: boolean
         default: false
+      testdata-url:
+        description: 'Optional URL to the test data file for unit tests'
+        required: false
+        type: string
+      testdata-path:
+        description: 'Optional path where the test data file for unit tests should be placed'
+        required: false
+        type: string
+        default: testdata.json
 
 jobs:
   build:
@@ -132,6 +141,23 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        
+      # Restore cache if file already cached
+      - name: Restore test data cache
+        if: ${{ inputs.testdata-url != '' }}
+        id: cache-testdata
+        uses: actions/cache@v4
+        with:
+          path: ${{ inputs.testdata-path }}
+          key: testdata-${{ inputs.testdata-url }}-${{ inputs.testdata-path }}
+
+      # Download file if cache miss
+      - name: Download test data (if cache miss)
+        if: ${{ inputs.testdata-url != '' && steps.cache-testdata.outputs.cache-hit != 'true' }}
+        run: |
+          echo "Cache miss — downloading test data from ${{ inputs.testdata-url }} to ${{ inputs.testdata-path }}..."
+          mkdir -p "$(dirname "${{ inputs.testdata-path }}")"
+          curl -L -o "${{ inputs.testdata-path }}" "${{ inputs.testdata-url }}"
 
       - name: Set up Go
         uses: actions/setup-go@v5
