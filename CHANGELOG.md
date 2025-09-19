@@ -2,8 +2,11 @@
 
 ## Unreleased
 
+## 0.13.5
+
 - Add support for downloading/caching test file for unit tests
 - Add codeowners
+- Remove dockerfile_lint dependency from docker_build
 
 ## 0.13.4
 
