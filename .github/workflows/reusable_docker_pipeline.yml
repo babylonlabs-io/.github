@@ -103,7 +103,6 @@ jobs:
     runs-on: ${{ matrix.runner }}
     needs:
       - prepare-metadata
-      - dockerfile_lint
     strategy:
       fail-fast: false
       matrix:
