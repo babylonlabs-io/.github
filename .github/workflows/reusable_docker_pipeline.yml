@@ -182,7 +182,7 @@ jobs:
 
       - name: Build and push to ECR
         id: build-ecr
-        if: inputs.push_to_ecr
+        if: inputs.publish && inputs.push_to_ecr
         uses: docker/build-push-action@v6
         with:
           platforms: ${{ matrix.platform }}
