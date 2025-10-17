@@ -171,7 +171,7 @@ jobs:
 
       - name: Build and push to Docker Hub
         id: build-dockerhub
-        if: inputs.push_to_dockerhub
+        if: inputs.publish && inputs.push_to_dockerhub
         uses: docker/build-push-action@v6
         with:
           platforms: ${{ matrix.platform }}
