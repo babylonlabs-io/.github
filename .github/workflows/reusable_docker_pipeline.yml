@@ -72,10 +72,21 @@ on:
         type: boolean
         description: 'Push to ECR'
         default: true
+      runs_on:
+        required: false
+        type: string
+        description: 'Runner environment'
+        default: 'ubuntu-24.04'
+      timeout_minutes:
+        required: false
+        type: number
+        description: 'Job timeout in minutes'
+        default: 60
 
 jobs:
   prepare-metadata:
-    runs-on: ubuntu-24.04
+    runs-on: ${{ inputs.runs_on }}
+    timeout-minutes: ${{ inputs.timeout_minutes }}
     outputs:
       image-name: ${{ steps.set_image_name.outputs.IMAGE_NAME }}
     steps:
@@ -89,7 +100,8 @@ jobs:
           fi
 
   dockerfile_lint:
-    runs-on: ubuntu-24.04
+    runs-on: ${{ inputs.runs_on }}
+    timeout-minutes: ${{ inputs.timeout_minutes }}
     if: inputs.docker_scan
     steps:
     - name: Checkout repository
@@ -111,6 +123,7 @@ jobs:
 
   docker_build:
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: ${{ inputs.timeout_minutes }}
     needs:
       - prepare-metadata
     strategy:
@@ -224,7 +237,8 @@ jobs:
           retention-days: 1
 
   merge_dockerhub:
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runs_on }}
+    timeout-minutes: ${{ inputs.timeout_minutes }}
     if: inputs.publish && inputs.push_to_dockerhub
     needs:
       - docker_build
@@ -275,7 +289,8 @@ jobs:
           docker buildx imagetools inspect ${{ vars.DOCKERHUB_REGISTRY_ID }}/${{ needs.prepare-metadata.outputs.image-name }}:${{ steps.meta.outputs.version }}
 
   merge_ecr:
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runs_on }}
+    timeout-minutes: ${{ inputs.timeout_minutes }}
     if: inputs.publish && inputs.push_to_ecr
     needs:
       - docker_build
@@ -325,7 +340,8 @@ jobs:
           docker buildx imagetools inspect ${{ vars.AWS_ECR_REGISTRY_ID }}/${{ needs.prepare-metadata.outputs.image-name }}:${{ steps.meta.outputs.version }}
 
   vulnerability_scan:
-    runs-on: ubuntu-24.04
+    runs-on: ${{ inputs.runs_on }}
+    timeout-minutes: ${{ inputs.timeout_minutes }}
     if: inputs.publish && inputs.docker_scan && inputs.push_to_dockerhub
     needs:
       - merge_dockerhub
