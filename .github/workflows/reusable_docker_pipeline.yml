@@ -72,11 +72,16 @@ on:
         type: boolean
         description: 'Push to ECR'
         default: true
-      runs_on:
+      runs_on_amd64:
         required: false
         type: string
-        description: 'Runner environment'
+        description: 'Runner environment for AMD64'
         default: 'ubuntu-24.04'
+      runs_on_arm64:
+        required: false
+        type: string
+        description: 'Runner environment for ARM64'
+        default: 'ubuntu-24.04-arm64'
       timeout_minutes:
         required: false
         type: number
@@ -85,7 +90,7 @@ on:
 
 jobs:
   prepare-metadata:
-    runs-on: ${{ inputs.runs_on }}
+    runs-on: ${{ inputs.runs_on_amd64 }}
     timeout-minutes: ${{ inputs.timeout_minutes }}
     outputs:
       image-name: ${{ steps.set_image_name.outputs.IMAGE_NAME }}
@@ -100,7 +105,7 @@ jobs:
           fi
 
   dockerfile_lint:
-    runs-on: ${{ inputs.runs_on }}
+    runs-on: ${{ inputs.runs_on_amd64 }}
     timeout-minutes: ${{ inputs.timeout_minutes }}
     if: inputs.docker_scan
     steps:
@@ -133,13 +138,13 @@ jobs:
           - linux/amd64
           - linux/arm64
         runner:
-          - ${{ inputs.runs_on }}
-          - ${{ inputs.runs_on }}-arm64
+          - ${{ inputs.runs_on_amd64 }}
+          - ${{ inputs.runs_on_arm64 }}
         exclude:
         - platform: linux/amd64
-          runner: ${{ inputs.runs_on }}-arm64
+          runner: ${{ inputs.runs_on_arm64 }}
         - platform: linux/arm64
-          runner: ${{ inputs.runs_on }}
+          runner: ${{ inputs.runs_on_amd64 }}
     steps:
       - name: Prepare
         run: |
@@ -237,7 +242,7 @@ jobs:
           retention-days: 1
 
   merge_dockerhub:
-    runs-on: ${{ inputs.runs_on }}
+    runs-on: ${{ inputs.runs_on_amd64 }}
     timeout-minutes: ${{ inputs.timeout_minutes }}
     if: inputs.publish && inputs.push_to_dockerhub
     needs:
@@ -289,7 +294,7 @@ jobs:
           docker buildx imagetools inspect ${{ vars.DOCKERHUB_REGISTRY_ID }}/${{ needs.prepare-metadata.outputs.image-name }}:${{ steps.meta.outputs.version }}
 
   merge_ecr:
-    runs-on: ${{ inputs.runs_on }}
+    runs-on: ${{ inputs.runs_on_amd64 }}
     timeout-minutes: ${{ inputs.timeout_minutes }}
     if: inputs.publish && inputs.push_to_ecr
     needs:
@@ -340,7 +345,7 @@ jobs:
           docker buildx imagetools inspect ${{ vars.AWS_ECR_REGISTRY_ID }}/${{ needs.prepare-metadata.outputs.image-name }}:${{ steps.meta.outputs.version }}
 
   vulnerability_scan:
-    runs-on: ${{ inputs.runs_on }}
+    runs-on: ${{ inputs.runs_on_amd64 }}
     timeout-minutes: ${{ inputs.timeout_minutes }}
     if: inputs.publish && inputs.docker_scan && inputs.push_to_dockerhub
     needs:
