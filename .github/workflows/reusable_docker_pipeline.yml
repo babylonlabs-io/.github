@@ -183,9 +183,9 @@ jobs:
         run: |
           SECRETS=""
           if [ -n "${{ inputs.go-private-repos-authentication }}" ]; then
-            SECRETS+='"GO_PRIVATE_TOKEN=${{ secrets.GO_PRIVATE_TOKEN }}"\n'
+            SECRETS+="GO_PRIVATE_TOKEN=${{ secrets.GO_PRIVATE_TOKEN }}"
           elif [ -n "${{ inputs.vault-repos-authentication }}" ]; then
-            SECRETS+='"VAULT_REPOS_RO=${{ secrets.VAULT_REPOS_RO }}"\n'
+            SECRETS+="VAULT_REPOS_RO=${{ secrets.VAULT_REPOS_RO }}"
           fi
           echo "::add-mask::$SECRETS"
           echo "SECRETS<<EOF" >> $GITHUB_OUTPUT
