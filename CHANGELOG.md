@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.14.2
+- Enable vault repos RO access on docker pipeline
+- Add arm runner input in docker pipeline
+
 ## 0.14.1
 - Add inputs to reusable Docker pipeline to change the runner and timeout
 
