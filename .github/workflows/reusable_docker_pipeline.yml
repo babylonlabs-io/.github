@@ -182,10 +182,11 @@ jobs:
         id: set-build-secrets
         run: |
           SECRETS=""
-          if [ -n "${{ inputs.go-private-repos-authentication }}" ]; then
-            SECRETS+="GO_PRIVATE_TOKEN=${{ secrets.GO_PRIVATE_TOKEN }}"
-          elif [ -n "${{ inputs.vault-repos-authentication }}" ]; then
-            SECRETS+="VAULT_REPOS_RO=${{ secrets.VAULT_REPOS_RO }}"
+          if [ "${{ inputs.go-private-repos-authentication }}" == "true" ]; then
+            SECRETS+="GO_PRIVATE_TOKEN=${{ secrets.GO_PRIVATE_TOKEN }}\n"
+          fi
+          if [ "${{ inputs.vault-repos-authentication }}" == "true" ]; then
+            SECRETS+="VAULT_REPOS_RO=${{ secrets.VAULT_REPOS_RO }}\n"
           fi
           echo "::add-mask::$SECRETS"
           echo "SECRETS<<EOF" >> $GITHUB_OUTPUT
