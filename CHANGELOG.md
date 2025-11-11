@@ -3,7 +3,7 @@
 ## Unreleased
 
 ## 0.14.2
-- Enable vault repos RO access on docker pipeline
+- Enable private repos access through token env variable on docker pipeline
 
 ## 0.14.1
 - Add inputs to reusable Docker pipeline to change the runner and timeout

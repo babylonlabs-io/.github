@@ -42,7 +42,7 @@ on:
         description: 'Enable authentication for private repositories'
         type: boolean
         default: false
-      vault-repos-authentication:
+      private-repos-authentication:
         description: 'Enable authentication for private Vault private repositories'
         type: boolean
         default: false
@@ -185,8 +185,8 @@ jobs:
           if [ "${{ inputs.go-private-repos-authentication }}" == "true" ]; then
             SECRETS+="GO_PRIVATE_TOKEN=${{ secrets.GO_PRIVATE_TOKEN }}\n"
           fi
-          if [ "${{ inputs.vault-repos-authentication }}" == "true" ]; then
-            SECRETS+="VAULT_REPOS_RO=${{ secrets.VAULT_REPOS_RO }}\n"
+          if [ "${{ inputs.private-repos-authentication }}" == "true" ]; then
+            SECRETS+="PRIVATE_REPO_TOKEN=${{ secrets.PRIVATE_REPO_TOKEN }}\n"
           fi
           echo "::add-mask::$SECRETS"
           echo "SECRETS<<EOF" >> $GITHUB_OUTPUT
