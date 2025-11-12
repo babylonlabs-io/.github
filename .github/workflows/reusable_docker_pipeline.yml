@@ -204,6 +204,7 @@ jobs:
           file: ${{ inputs.dockerfile }}
           build-args: |
             ${{ inputs.buildArgs }}
+          secrets: |
             ${{ steps.set-build-secrets.outputs.SECRETS }}
           outputs: type=image,name=${{ vars.DOCKERHUB_REGISTRY_ID || 'babylonlabs' }}/${{ needs.prepare-metadata.outputs.image-name }},push-by-digest=true,push=${{ inputs.publish }}
 
@@ -217,6 +218,7 @@ jobs:
           file: ${{ inputs.dockerfile }}
           build-args: |
             ${{ inputs.buildArgs }}
+          secrets: |
             ${{ steps.set-build-secrets.outputs.SECRETS }}
           outputs: type=image,name=${{ vars.AWS_ECR_REGISTRY_ID || 'babylonlabs' }}/${{ needs.prepare-metadata.outputs.image-name }},push-by-digest=true,push=${{ inputs.publish }}
 
