@@ -42,6 +42,10 @@ on:
         description: 'Enable authentication for private repositories'
         type: boolean
         default: false
+      private-repos-authentication:
+        description: 'Enable authentication for private Vault private repositories'
+        type: boolean
+        default: false
       platforms:
         required: false
         type: string
@@ -178,8 +182,11 @@ jobs:
         id: set-build-secrets
         run: |
           SECRETS=""
-          if [ -n "${{ inputs.go-private-repos-authentication }}" ]; then
-            SECRETS+='"GO_PRIVATE_TOKEN=${{ secrets.GO_PRIVATE_TOKEN }}"\n'
+          if [ "${{ inputs.go-private-repos-authentication }}" == "true" ]; then
+            SECRETS+="GO_PRIVATE_TOKEN=${{ secrets.GO_PRIVATE_TOKEN }}\n"
+          fi
+          if [ "${{ inputs.private-repos-authentication }}" == "true" ]; then
+            SECRETS+="PRIVATE_REPO_TOKEN=${{ secrets.PRIVATE_REPO_TOKEN }}\n"
           fi
           echo "::add-mask::$SECRETS"
           echo "SECRETS<<EOF" >> $GITHUB_OUTPUT
@@ -195,7 +202,10 @@ jobs:
           platforms: ${{ matrix.platform }}
           context: ${{ inputs.dockerContext }}
           file: ${{ inputs.dockerfile }}
-          build-args: ${{ inputs.buildArgs }}
+          build-args: |
+            ${{ inputs.buildArgs }}
+          secrets: |
+            ${{ steps.set-build-secrets.outputs.SECRETS }}
           outputs: type=image,name=${{ vars.DOCKERHUB_REGISTRY_ID || 'babylonlabs' }}/${{ needs.prepare-metadata.outputs.image-name }},push-by-digest=true,push=${{ inputs.publish }}
 
       - name: Build and push to ECR
@@ -206,7 +216,10 @@ jobs:
           platforms: ${{ matrix.platform }}
           context: ${{ inputs.dockerContext }}
           file: ${{ inputs.dockerfile }}
-          build-args: ${{ inputs.buildArgs }}
+          build-args: |
+            ${{ inputs.buildArgs }}
+          secrets: |
+            ${{ steps.set-build-secrets.outputs.SECRETS }}
           outputs: type=image,name=${{ vars.AWS_ECR_REGISTRY_ID || 'babylonlabs' }}/${{ needs.prepare-metadata.outputs.image-name }},push-by-digest=true,push=${{ inputs.publish }}
 
       - name: Export digest Docker Hub
