@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+## 0.14.3
+- Enable create ecr repo if not existed
+
 ## 0.14.2
 - Enable private repos access through token env variable on docker pipeline
 
