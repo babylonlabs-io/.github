@@ -176,6 +176,27 @@ jobs:
           username: ${{ secrets.AWS_ACCESS_KEY_ID }}
           password: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
 
+      - name: Create ECR repository if not exists
+        if: inputs.publish && inputs.push_to_ecr
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: ${{ vars.AWS_ECR_REGION }}
+          REPOSITORY_NAME: ${{ needs.prepare-metadata.outputs.image-name }}
+        run: |
+          # Check if repository exists
+          if ! aws ecr describe-repositories --repository-names "${REPOSITORY_NAME}" --region "${AWS_REGION}" > /dev/null 2>&1; then
+            echo "Repository ${REPOSITORY_NAME} does not exist. Creating..."
+            aws ecr create-repository \
+              --repository-name "${REPOSITORY_NAME}" \
+              --region "${AWS_REGION}" \
+              --image-scanning-configuration scanOnPush=true \
+              --image-tag-mutability IMMUTABLE
+            echo "Repository ${REPOSITORY_NAME} created successfully"
+          else
+            echo "Repository ${REPOSITORY_NAME} already exists"
+          fi
+
       # This block is used to not hard-coded the secrets in Build Docker image
       # Secrets are only added when necessary
       - name: Generate and mask build secrets
