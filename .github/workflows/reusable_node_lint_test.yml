@@ -1,10 +1,10 @@
-name: Reusable Go Build, Lint, and Test Workflow
+name: Reusable Node.js Build, Lint, and Test Workflow
 
 on:
   workflow_call:
     inputs:
       node-version:
-        description: 'Node version'
+        description: 'Node version (must include npm >= 11.5.1 for OIDC support)'
         type: string
         default: '24.2'
       run-unit-tests:
@@ -37,9 +37,19 @@ on:
         type: boolean
         default: false
 
+# Required for npm OIDC trusted publishing
+permissions:
+  id-token: write
+  contents: read
+
 jobs:
   build:
     runs-on: ubuntu-24.04
+
+    # Job-level permissions for OIDC
+    permissions:
+      id-token: write
+      contents: read
 
     steps:
     - name: Validate Inputs
@@ -66,6 +76,7 @@ jobs:
       uses: actions/setup-node@v4
       with:
         node-version: ${{ inputs.node-version }}
+        registry-url: 'https://registry.npmjs.org'
 
     - name: Install dependencies
       run: npm install
@@ -89,17 +100,13 @@ jobs:
         publish: ${{ inputs.publish-command }}
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
     
     - name: Run semantic-release
       if: ${{ inputs.use-semantic-release }}
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
       run: npx semantic-release
 
     - name: Publish package
       if: ${{ inputs.publish }}
-      run: |
-        echo "//registry.npmjs.org/:_authToken=${{ secrets.NPM_TOKEN }}" > .npmrc
-        ${{ inputs.publish-command }}
+      run: ${{ inputs.publish-command }}
