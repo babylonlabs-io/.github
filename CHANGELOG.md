@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+## 0.14.5
+- Remove classic AWS token from docker workflow and add id-token perms to use OIDC
+
 ## 0.14.4
 - Remove classic NPM token from node workflow and add id-token perms to use OIDC
 
