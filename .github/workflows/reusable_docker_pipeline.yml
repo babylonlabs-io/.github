@@ -177,14 +177,14 @@ jobs:
         uses: aws-actions/configure-aws-credentials@v4
         if: inputs.publish && inputs.push_to_ecr
         with:
-          role-to-assume: arn:aws:iam::${{ vars.AWS_ECR_REGISTRY_ID }}:role/gha-ecr-push
+          role-to-assume: arn:aws:iam::${{ vars.AWS_ECR_ACCOUNT }}:role/gha-ecr-push
           role-session-name: gh-docker-build-${{ github.run_id }}
           aws-region: ${{ vars.AWS_ECR_REGION }}
 
       - name: Login to Amazon ECR
         if: inputs.publish && inputs.push_to_ecr
         run: |
-          aws ecr get-login-password --region ${{ vars.AWS_ECR_REGISTRY_ID }} | docker login --username AWS --password-stdin ${{ vars.AWS_ECR_REGISTRY_ID }}.dkr.ecr.${{ vars.AWS_ECR_REGION }}.amazonaws.com
+          aws ecr get-login-password --region ${{ vars.AWS_ECR_REGION }} | docker login --username AWS --password-stdin ${{ vars.AWS_ECR_REGISTRY_ID }}
 
       - name: Create ECR repository if not exists
         if: inputs.publish && inputs.push_to_ecr
@@ -369,14 +369,14 @@ jobs:
         uses: aws-actions/configure-aws-credentials@v4
         if: inputs.publish && inputs.push_to_ecr
         with:
-          role-to-assume: arn:aws:iam::${{ vars.AWS_ECR_REGISTRY_ID }}:role/gha-ecr-push
+          role-to-assume: arn:aws:iam::${{ vars.AWS_ECR_ACCOUNT }}:role/gha-ecr-push
           role-session-name: gh-docker-build-${{ github.run_id }}
           aws-region: ${{ vars.AWS_ECR_REGION }}
 
       - name: Login to Amazon ECR
         if: inputs.publish && inputs.push_to_ecr
         run: |
-          aws ecr get-login-password --region ${{ vars.AWS_ECR_REGISTRY_ID }} | docker login --username AWS --password-stdin ${{ vars.AWS_ECR_REGISTRY_ID }}.dkr.ecr.${{ vars.AWS_ECR_REGION }}.amazonaws.com
+          aws ecr get-login-password --region ${{ vars.AWS_ECR_REGION }} | docker login --username AWS --password-stdin ${{ vars.AWS_ECR_REGISTRY_ID }}
 
       - name: Create manifest list and push
         working-directory: /tmp/digests/
