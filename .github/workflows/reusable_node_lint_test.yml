@@ -37,19 +37,21 @@ on:
         type: boolean
         default: false
 
-# Required for npm OIDC trusted publishing
+# Required for npm OIDC trusted publishing and semantic-release
 permissions:
-  id-token: write
-  contents: read
+  id-token: write       # npm OIDC authentication
+  contents: write       # Create git tags and GitHub releases
+  pull-requests: write  # Comment on released PRs
 
 jobs:
   build:
     runs-on: ubuntu-24.04
 
-    # Job-level permissions for OIDC
+    # Job-level permissions for OIDC and semantic-release
     permissions:
       id-token: write
-      contents: read
+      contents: write
+      pull-requests: write
 
     steps:
     - name: Validate Inputs
