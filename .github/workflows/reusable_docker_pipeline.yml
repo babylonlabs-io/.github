@@ -96,6 +96,7 @@ on:
 permissions:
   id-token: write
   contents: read
+  security-events: write
 
 jobs:
   prepare-metadata:

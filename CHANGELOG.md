@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+## 0.14.6
+- Enable security-events permission to upload scan report
+
 ## 0.14.5
 - Remove classic AWS token from docker workflow and add id-token perms to use OIDC
 
