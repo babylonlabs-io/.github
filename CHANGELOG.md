@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+## 0.15.0
+- Bump version
+
 ## 0.14.6
 - Enable security-events permission to upload scan report
 
