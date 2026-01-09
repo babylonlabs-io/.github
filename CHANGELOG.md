@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+## 0.15.0
+- Promote all changes from the 0.14.0–0.14.7 series to the 0.15.0 stable release (no additional code changes).
+
 ## 0.14.7
 - Add permissions for NPM semantic release workflow to work with OIDC.
 
