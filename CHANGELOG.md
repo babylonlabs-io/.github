@@ -3,7 +3,10 @@
 ## Unreleased
 
 ## 0.15.0
-- Bump version
+- Bump stable version
+
+## 0.14.7
+- Add permissions for NPM semantic release workflow to work with OIDC.
 
 ## 0.14.6
 - Enable security-events permission to upload scan report
