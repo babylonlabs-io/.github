@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+## 0.16.0
+- Restructure reusable Docker pipeline to scan images with Trivy (filesystem and image scans) before pushing to registries, with results published to GitHub Security tab via SARIF upload
+
 ## 0.15.0
 - Promote all changes from the 0.14.0–0.14.7 series to the 0.15.0 stable release (no additional code changes).
 
