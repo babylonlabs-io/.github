@@ -55,22 +55,32 @@ on:
         required: false
         type: boolean
         description: 'Enable Trivy & Hadolint'
-        default: false
+        default: true
       hadolint_nofail:
         required: false
         type: boolean
         description: 'Ignore Hadolint failures'
-        default: true
+        default: false
       trivy_nofail:
         required: false
         type: boolean
         description: 'Ignore Trivy failures'
-        default: true
+        default: false
+      secret_nofail:
+        required: false
+        type: boolean
+        description: 'Ignore Trivy secret scan failures'
+        default: false
+      secret_config:
+        required: false
+        type: string
+        description: 'Path to trivy-secret.yaml for secret scan allow-rules'
+        default: ''
       push_to_dockerhub:
         required: false
         type: boolean
         description: 'Push to DockerHub'
-        default: true
+        default: false
       push_to_ecr:
         required: false
         type: boolean
@@ -130,11 +140,25 @@ jobs:
         no-fail: ${{ inputs.hadolint_nofail }}
         dockerfile: ${{ inputs.dockerfile }}
 
-    - name: Upload linting results to GitHub Security tab
-      uses: github/codeql-action/upload-sarif@v3
+    - name: Add Hadolint results to Job Summary
       if: always()
+      run: |
+        echo "## 🐳 Hadolint Dockerfile Analysis" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        ISSUES=$(jq -r '.runs[0].results[] | "- **\(.ruleId)** (line \(.locations[0].physicalLocation.region.startLine)): \(.message.text)"' hadolint-result.sarif 2>/dev/null)
+        if [ -n "$ISSUES" ]; then
+          echo "### Issues Found" >> $GITHUB_STEP_SUMMARY
+          echo "$ISSUES" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "✅ **No issues found** - Dockerfile follows best practices" >> $GITHUB_STEP_SUMMARY
+        fi
+
+    - name: Upload linting results to GitHub Security tab
+      uses: github/codeql-action/upload-sarif@v4
+      if: always() && github.event.repository.visibility == 'public'
       with:
         sarif_file: hadolint-result.sarif
+        category: hadolint
 
   docker_build:
     runs-on: ${{ matrix.runner }}
@@ -163,6 +187,45 @@ jobs:
 
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      # ===========================================
+      # PRE-PUSH VULNERABILITY SCANNING
+      # Scan before any push to ensure only clean images reach registries
+      # ===========================================
+
+      # Filesystem scan - fastest fail, catches dependency vulnerabilities before build
+      # Only runs on amd64 to avoid redundant scans (source deps are platform-independent)
+      - name: Run Trivy filesystem scan
+        id: fs-scan
+        if: inputs.docker_scan && matrix.platform == 'linux/amd64'
+        continue-on-error: true
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'table'
+          output: 'trivy-fs.txt'
+          exit-code: '1'
+          ignore-unfixed: true
+          vuln-type: 'library'
+          severity: 'CRITICAL'
+          trivyignores: ${{ hashFiles('.trivyignore') != '' && '.trivyignore' || '' }}
+
+      # Filesystem secret scan - catches leaked credentials in source code before build
+      - name: Run Trivy filesystem secret scan
+        id: fs-secret-scan
+        if: inputs.docker_scan && matrix.platform == 'linux/amd64'
+        continue-on-error: true
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          scanners: 'secret'
+          format: 'table'
+          output: 'trivy-fs-secrets.txt'
+          exit-code: '1'
+          severity: 'CRITICAL,HIGH'
+          secret-config: ${{ inputs.secret_config }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -224,6 +287,201 @@ jobs:
           echo "EOF" >> $GITHUB_OUTPUT
         shell: bash
 
+      # Build image locally for scanning (not pushed yet)
+      - name: Build image for scanning
+        id: build-local
+        if: inputs.docker_scan
+        uses: docker/build-push-action@v6
+        with:
+          platforms: ${{ matrix.platform }}
+          context: ${{ inputs.dockerContext }}
+          file: ${{ inputs.dockerfile }}
+          build-args: |
+            ${{ inputs.buildArgs }}
+          secrets: |
+            ${{ steps.set-build-secrets.outputs.SECRETS }}
+          load: true
+          tags: local-scan:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Image scan - catches container vulnerabilities before push
+      - name: Run Trivy image scan
+        id: image-scan
+        if: inputs.docker_scan
+        continue-on-error: true
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: 'local-scan:${{ github.sha }}'
+          format: 'table'
+          output: 'trivy-image.txt'
+          exit-code: '1'
+          ignore-unfixed: true
+          vuln-type: 'os,library'
+          severity: 'CRITICAL'
+          trivyignores: ${{ hashFiles('.trivyignore') != '' && '.trivyignore' || '' }}
+
+      # Image secret scan - catches leaked credentials baked into Docker layers
+      - name: Run Trivy image secret scan
+        id: image-secret-scan
+        if: inputs.docker_scan
+        continue-on-error: true
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: 'local-scan:${{ github.sha }}'
+          scanners: 'secret'
+          format: 'table'
+          output: 'trivy-image-secrets.txt'
+          exit-code: '1'
+          severity: 'CRITICAL,HIGH'
+          secret-config: ${{ inputs.secret_config }}
+
+      # Write scan results to Job Summary
+      - name: Add scan results to Job Summary
+        if: inputs.docker_scan && always()
+        env:
+          FS_SCAN_OUTCOME: ${{ steps.fs-scan.outcome }}
+          IMAGE_SCAN_OUTCOME: ${{ steps.image-scan.outcome }}
+          FS_SECRET_OUTCOME: ${{ steps.fs-secret-scan.outcome }}
+          IMAGE_SECRET_OUTCOME: ${{ steps.image-secret-scan.outcome }}
+        run: |
+          echo "## 🐳 Container Image Vulnerabilities" >> $GITHUB_STEP_SUMMARY
+          echo "Platform: \`${{ matrix.platform }}\`" >> $GITHUB_STEP_SUMMARY
+          case "$IMAGE_SCAN_OUTCOME" in
+            failure)
+              if [ -f trivy-image.txt ]; then
+                echo '```' >> $GITHUB_STEP_SUMMARY
+                cat trivy-image.txt >> $GITHUB_STEP_SUMMARY
+                echo '```' >> $GITHUB_STEP_SUMMARY
+              else
+                echo "⚠️ Scan failed but no output file found" >> $GITHUB_STEP_SUMMARY
+              fi
+              ;;
+            success)
+              echo "✅ No critical vulnerabilities found" >> $GITHUB_STEP_SUMMARY
+              ;;
+            *)
+              echo "⚠️ Scan did not complete (outcome: $IMAGE_SCAN_OUTCOME)" >> $GITHUB_STEP_SUMMARY
+              ;;
+          esac
+          echo "" >> $GITHUB_STEP_SUMMARY
+          # FS scan only runs on amd64 (source deps are platform-independent)
+          echo "## 📦 Source Dependency Vulnerabilities" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ matrix.platform }}" != "linux/amd64" ]; then
+            echo "ℹ️ Filesystem scan only runs on linux/amd64" >> $GITHUB_STEP_SUMMARY
+          else
+            case "$FS_SCAN_OUTCOME" in
+              failure)
+                if [ -f trivy-fs.txt ]; then
+                  echo '```' >> $GITHUB_STEP_SUMMARY
+                  cat trivy-fs.txt >> $GITHUB_STEP_SUMMARY
+                  echo '```' >> $GITHUB_STEP_SUMMARY
+                else
+                  echo "⚠️ Scan failed but no output file found" >> $GITHUB_STEP_SUMMARY
+                fi
+                ;;
+              success)
+                echo "✅ No critical vulnerabilities found" >> $GITHUB_STEP_SUMMARY
+                ;;
+              *)
+                echo "⚠️ Scan did not complete (outcome: $FS_SCAN_OUTCOME)" >> $GITHUB_STEP_SUMMARY
+                ;;
+            esac
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## 🔑 Image Secret Scan" >> $GITHUB_STEP_SUMMARY
+          echo "Platform: \`${{ matrix.platform }}\`" >> $GITHUB_STEP_SUMMARY
+          case "$IMAGE_SECRET_OUTCOME" in
+            failure)
+              if [ -f trivy-image-secrets.txt ]; then
+                echo '```' >> $GITHUB_STEP_SUMMARY
+                cat trivy-image-secrets.txt >> $GITHUB_STEP_SUMMARY
+                echo '```' >> $GITHUB_STEP_SUMMARY
+              else
+                echo "⚠️ Scan failed but no output file found" >> $GITHUB_STEP_SUMMARY
+              fi
+              ;;
+            success)
+              echo "✅ No secrets found in image" >> $GITHUB_STEP_SUMMARY
+              ;;
+            *)
+              echo "⚠️ Scan did not complete (outcome: $IMAGE_SECRET_OUTCOME)" >> $GITHUB_STEP_SUMMARY
+              ;;
+          esac
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## 🔑 Filesystem Secret Scan" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ matrix.platform }}" != "linux/amd64" ]; then
+            echo "ℹ️ Filesystem secret scan only runs on linux/amd64" >> $GITHUB_STEP_SUMMARY
+          else
+            case "$FS_SECRET_OUTCOME" in
+              failure)
+                if [ -f trivy-fs-secrets.txt ]; then
+                  echo '```' >> $GITHUB_STEP_SUMMARY
+                  cat trivy-fs-secrets.txt >> $GITHUB_STEP_SUMMARY
+                  echo '```' >> $GITHUB_STEP_SUMMARY
+                else
+                  echo "⚠️ Scan failed but no output file found" >> $GITHUB_STEP_SUMMARY
+                fi
+                ;;
+              success)
+                echo "✅ No secrets found in source code" >> $GITHUB_STEP_SUMMARY
+                ;;
+              *)
+                echo "⚠️ Scan did not complete (outcome: $FS_SECRET_OUTCOME)" >> $GITHUB_STEP_SUMMARY
+                ;;
+            esac
+          fi
+
+      # Fail the job if vulnerabilities found and trivy_nofail is false
+      # Only triggers on actual 'failure' outcome (not skipped/cancelled)
+      - name: Enforce vulnerability policy
+        if: |
+          inputs.docker_scan &&
+          inputs.trivy_nofail == false &&
+          (steps.fs-scan.outcome == 'failure' || steps.image-scan.outcome == 'failure')
+        run: |
+          echo "::error::Vulnerabilities found and trivy_nofail is false. Failing the build."
+          exit 1
+
+      # Fail the job if secrets found and secret_nofail is false
+      - name: Enforce secret scan policy
+        if: |
+          inputs.docker_scan &&
+          inputs.secret_nofail == false &&
+          (steps.fs-secret-scan.outcome == 'failure' || steps.image-secret-scan.outcome == 'failure')
+        run: |
+          echo "::error::Secrets found and secret_nofail is false. Failing the build."
+          exit 1
+
+      # SARIF scan for GitHub Security tab (public repos only)
+      # Note: Uses broader severity (CRITICAL,HIGH,MEDIUM) for visibility/awareness,
+      # while enforcement scans use CRITICAL only to avoid blocking on lower severity
+      - name: Run Trivy filesystem scan (SARIF)
+        id: sarif-scan
+        if: inputs.docker_scan && matrix.platform == 'linux/amd64' && github.event.repository.visibility == 'public'
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'sarif'
+          output: 'trivy-fs.sarif'
+          exit-code: '0'
+          ignore-unfixed: true
+          vuln-type: 'library'
+          severity: 'CRITICAL,HIGH,MEDIUM'
+          trivyignores: ${{ hashFiles('.trivyignore') != '' && '.trivyignore' || '' }}
+
+      - name: Upload SARIF to GitHub Security tab
+        if: inputs.docker_scan && matrix.platform == 'linux/amd64' && github.event.repository.visibility == 'public' && steps.sarif-scan.outcome == 'success'
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: 'trivy-fs.sarif'
+          category: trivy-fs-${{ env.PLATFORM_PAIR }}
+
+      # ===========================================
+      # PUSH TO REGISTRIES (only after scans pass)
+      # ===========================================
+
       - name: Build and push to Docker Hub
         id: build-dockerhub
         if: inputs.publish && inputs.push_to_dockerhub
@@ -236,6 +494,7 @@ jobs:
             ${{ inputs.buildArgs }}
           secrets: |
             ${{ steps.set-build-secrets.outputs.SECRETS }}
+          cache-from: type=gha
           outputs: type=image,name=${{ vars.DOCKERHUB_REGISTRY_ID || 'babylonlabs' }}/${{ needs.prepare-metadata.outputs.image-name }},push-by-digest=true,push=${{ inputs.publish }}
 
       - name: Build and push to ECR
@@ -250,6 +509,7 @@ jobs:
             ${{ inputs.buildArgs }}
           secrets: |
             ${{ steps.set-build-secrets.outputs.SECRETS }}
+          cache-from: type=gha
           outputs: type=image,name=${{ vars.AWS_ECR_REGISTRY_ID || 'babylonlabs' }}/${{ needs.prepare-metadata.outputs.image-name }},push-by-digest=true,push=${{ inputs.publish }}
 
       - name: Export digest Docker Hub
@@ -343,6 +603,8 @@ jobs:
     needs:
       - docker_build
       - prepare-metadata
+    outputs:
+      ecr_imgver: ${{ steps.meta.outputs.version }}
     steps:
       - name: Download digests
         uses: actions/download-artifact@v4
@@ -392,66 +654,3 @@ jobs:
       - name: Inspect image
         run: |
           docker buildx imagetools inspect ${{ vars.AWS_ECR_REGISTRY_ID }}/${{ needs.prepare-metadata.outputs.image-name }}:${{ steps.meta.outputs.version }}
-
-  vulnerability_scan:
-    runs-on: ${{ inputs.runs_on_amd64 }}
-    timeout-minutes: ${{ inputs.timeout_minutes }}
-    if: inputs.publish && inputs.docker_scan && inputs.push_to_dockerhub
-    needs:
-      - merge_dockerhub
-      - prepare-metadata
-    steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
-
-    - name: Create Trivy config
-      run: |
-        cat <<EOF > /tmp/trivy.yaml
-        format: sarif
-        output: trivy-results.sarif
-        vulnerability:
-          ignore-unfixed: true
-          type:
-            - os
-            - library
-        severity:
-          - CRITICAL
-          - HIGH
-          - MEDIUM
-        db:
-          repository: index.docker.io/aquasec/trivy-db:2
-        EOF
-
-    - name: Determine if we should fail the pipeline when Vulnerability found
-      run: |
-        if [[ "${{ inputs.trivy_nofail }}" == "false" ]]; then
-          echo "exit-code: '1'" >> /tmp/trivy.yaml; else
-          echo "exit-code: '0'" >> /tmp/trivy.yaml;
-        fi
-
-    - name: Run Trivy vulnerability scanner - Without ignore
-      uses: aquasecurity/trivy-action@0.28.0
-      if: ${{ hashFiles('.trivyignore') == '' }}
-      with:
-        image-ref: "${{ vars.DOCKERHUB_REGISTRY_ID }}/${{ needs.prepare-metadata.outputs.image-name }}:${{ needs.merge_dockerhub.outputs.dockerhub_imgver }}"
-        trivy-config: /tmp/trivy.yaml
-      env:
-        TRIVY_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-        TRIVY_PASSWORD: ${{ secrets.DOCKERHUB_TOKEN }}
-
-    - name: Run Trivy vulnerability scanner - With ignore
-      uses: aquasecurity/trivy-action@0.28.0
-      if: ${{ hashFiles('.trivyignore') != '' }}
-      with:
-        image-ref: "${{ vars.DOCKERHUB_REGISTRY_ID }}/${{ needs.prepare-metadata.outputs.image-name }}:${{ needs.merge_dockerhub.outputs.dockerhub_imgver }}"
-        trivy-config: /tmp/trivy.yaml
-        trivyignores: .trivyignore
-      env:
-        TRIVY_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-        TRIVY_PASSWORD: ${{ secrets.DOCKERHUB_TOKEN }}
-
-    - name: Upload Trivy scan results to GitHub Security tab
-      uses: github/codeql-action/upload-sarif@v3
-      if: always()
-      with:
-        sarif_file: 'trivy-results.sarif'
