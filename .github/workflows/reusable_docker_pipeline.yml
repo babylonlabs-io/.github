@@ -114,6 +114,7 @@ jobs:
     timeout-minutes: ${{ inputs.timeout_minutes }}
     outputs:
       image-name: ${{ steps.set_image_name.outputs.IMAGE_NAME }}
+      matrix: ${{ steps.set_matrix.outputs.MATRIX }}
     steps:
       - name: Determine image name
         id: set_image_name
@@ -122,6 +123,15 @@ jobs:
             echo "IMAGE_NAME=${{ inputs.repoName }}" >> $GITHUB_OUTPUT
           else
             echo "IMAGE_NAME=$(echo $GITHUB_REPOSITORY | cut -d '/' -f 2)" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Set build matrix
+        id: set_matrix
+        run: |
+          if [ "${{ inputs.disable_arm64 }}" == "true" ]; then
+            echo 'MATRIX={"include":[{"platform":"linux/amd64","runner":"${{ inputs.runs_on_amd64 }}"}]}' >> $GITHUB_OUTPUT
+          else
+            echo 'MATRIX={"include":[{"platform":"linux/amd64","runner":"${{ inputs.runs_on_amd64 }}"},{"platform":"linux/arm64","runner":"${{ inputs.runs_on_arm64 }}"}]}' >> $GITHUB_OUTPUT
           fi
 
   dockerfile_lint:
@@ -167,15 +177,7 @@ jobs:
       - prepare-metadata
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - platform: linux/amd64
-            runner: ${{ inputs.runs_on_amd64 }}
-          - platform: linux/arm64
-            runner: ${{ inputs.runs_on_arm64 }}
-        exclude:
-          - platform: ${{ inputs.disable_arm64 && 'linux/arm64' || 'none' }}
-            runner: ${{ inputs.disable_arm64 && inputs.runs_on_arm64 || 'none' }}
+      matrix: ${{ fromJSON(needs.prepare-metadata.outputs.matrix) }}
     steps:
       - name: Prepare
         run: |
