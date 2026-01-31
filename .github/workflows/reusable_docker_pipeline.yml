@@ -46,11 +46,6 @@ on:
         description: 'Enable authentication for private Vault private repositories'
         type: boolean
         default: false
-      platforms:
-        required: false
-        type: string
-        description: "Target platforms for Docker build"
-        default: "linux/amd64,linux/arm64"
       docker_scan:
         required: false
         type: boolean
@@ -101,6 +96,11 @@ on:
         type: number
         description: 'Job timeout in minutes'
         default: 60
+      disable_arm64:
+        required: false
+        type: boolean
+        description: 'Disable ARM64 builds'
+        default: false
 
 # For github OIDC authentication to AWS
 permissions:
@@ -168,17 +168,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        platform:
-          - linux/amd64
-          - linux/arm64
-        runner:
-          - ${{ inputs.runs_on_amd64 }}
-          - ${{ inputs.runs_on_arm64 }}
+        include:
+          - platform: linux/amd64
+            runner: ${{ inputs.runs_on_amd64 }}
+          - platform: linux/arm64
+            runner: ${{ inputs.runs_on_arm64 }}
         exclude:
-        - platform: linux/amd64
-          runner: ${{ inputs.runs_on_arm64 }}
-        - platform: linux/arm64
-          runner: ${{ inputs.runs_on_amd64 }}
+          - platform: ${{ inputs.disable_arm64 && 'linux/arm64' || 'none' }}
+            runner: ${{ inputs.disable_arm64 && inputs.runs_on_arm64 || 'none' }}
     steps:
       - name: Prepare
         run: |
