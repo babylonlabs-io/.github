@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+## 0.16.1
+- Re-add dockerfile_lint as a dependency of docker_build to block image publishing on lint failures
+
 ## 0.16.0
 - Restructure reusable Docker pipeline to scan images with Trivy (filesystem and image scans) before pushing to registries, with results published to GitHub Security tab via SARIF upload
 

@@ -127,12 +127,13 @@ jobs:
   dockerfile_lint:
     runs-on: ${{ inputs.runs_on_amd64 }}
     timeout-minutes: ${{ inputs.timeout_minutes }}
-    if: inputs.docker_scan
     steps:
     - name: Checkout repository
+      if: inputs.docker_scan
       uses: actions/checkout@v4
 
     - name: Dockerfile Linting
+      if: inputs.docker_scan
       uses: hadolint/hadolint-action@v3.1.0
       with:
         output-file: hadolint-result.sarif
@@ -141,7 +142,7 @@ jobs:
         dockerfile: ${{ inputs.dockerfile }}
 
     - name: Add Hadolint results to Job Summary
-      if: always()
+      if: inputs.docker_scan && always()
       run: |
         echo "## 🐳 Hadolint Dockerfile Analysis" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
@@ -155,7 +156,7 @@ jobs:
 
     - name: Upload linting results to GitHub Security tab
       uses: github/codeql-action/upload-sarif@v4
-      if: always() && github.event.repository.visibility == 'public'
+      if: inputs.docker_scan && always() && github.event.repository.visibility == 'public'
       with:
         sarif_file: hadolint-result.sarif
         category: hadolint
@@ -165,6 +166,7 @@ jobs:
     timeout-minutes: ${{ inputs.timeout_minutes }}
     needs:
       - prepare-metadata
+      - dockerfile_lint
     strategy:
       fail-fast: false
       matrix:
