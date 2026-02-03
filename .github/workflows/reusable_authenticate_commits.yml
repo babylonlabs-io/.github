@@ -1,0 +1,217 @@
+name: Authenticate Commits
+on:
+  # Direct trigger for organization rulesets
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+  # Reusable workflow trigger for explicit callers
+  workflow_call:
+    inputs:
+      head_sha:
+        description: 'Head SHA to verify (defaults to PR head SHA from caller event)'
+        required: false
+        type: string
+        default: ''
+      base_sha:
+        description: 'Base SHA to verify from (defaults to PR base SHA from caller event)'
+        required: false
+        type: string
+        default: ''
+      enforce_key_type:
+        description: 'Enforce sk-ssh-ed25519 (FIDO2) key type (default: true)'
+        required: false
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ inputs.head_sha || github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Import allowed SSH keys
+        env:
+          ALLOWED_SIGNERS: ${{ vars.BABYLON_ALLOWED_SIGNERS }}
+        run: |
+          set -euo pipefail
+          if [ -z "${ALLOWED_SIGNERS:-}" ]; then
+            echo "::error::BABYLON_ALLOWED_SIGNERS variable is not set. Configure it at org or repo level."
+            exit 1
+          fi
+          mkdir -p ~/.ssh
+          echo "$ALLOWED_SIGNERS" > ~/.ssh/allowed_signers
+          git config --global gpg.ssh.allowedSignersFile ~/.ssh/allowed_signers
+
+      - name: Validate commit signatures
+        env:
+          HEAD_SHA: ${{ inputs.head_sha || github.event.pull_request.head.sha }}
+          BASE_SHA: ${{ inputs.base_sha || github.event.pull_request.base.sha }}
+          ENFORCE_KEY_TYPE: ${{ github.event_name == 'pull_request' || inputs.enforce_key_type != false }}
+        run: |
+          set -euo pipefail
+
+          validate_sha() {
+            if ! [[ "$1" =~ ^[a-fA-F0-9]{40}$ ]]; then
+              echo "::error::Invalid SHA format: $1"
+              exit 1
+            fi
+          }
+
+          validate_sha "$HEAD_SHA"
+          validate_sha "$BASE_SHA"
+
+          commits=$(git rev-list --end-of-options "${BASE_SHA}".."${HEAD_SHA}" || true)
+          if [ -z "$commits" ]; then
+            echo "No commits to verify in range ${BASE_SHA:0:12}..${HEAD_SHA:0:12}."
+            {
+              echo "## 🔐 Commit Signature Verification"
+              echo ""
+              echo "No commits found in range \`${BASE_SHA:0:12}\`..\`${HEAD_SHA:0:12}\`."
+            } | tee -a "$GITHUB_STEP_SUMMARY" > /tmp/pr-comment-body.md
+            echo "" >> /tmp/pr-comment-body.md
+            echo "<!-- babylon-commit-auth -->" >> /tmp/pr-comment-body.md
+            exit 0
+          fi
+          commit_count=$(echo "$commits" | wc -l | tr -d ' ')
+          echo "Verifying $commit_count commit(s)..."
+
+          # Collect per-commit results
+          overall_failed=0
+          table_rows=""
+
+          for commit in $commits; do
+            short="${commit:0:12}"
+            author=$(git log -1 --format='%an' --end-of-options "$commit")
+            sig_ok="pass"
+            key_type_ok="pass"
+            key_type_value="-"
+
+            # Phase 1: Verify signature from allowed keys
+            if ! git verify-commit --end-of-options "$commit" 2>/dev/null; then
+              committer=$(git log -1 --format='%cn (%ce)' --end-of-options "$commit")
+              echo "::error::Commit ${short} from $committer is not signed by an allowed key."
+              sig_ok="fail"
+              overall_failed=1
+            fi
+
+            # Phase 2: Verify signing key type (if enforcement enabled and sig valid)
+            if [ "${ENFORCE_KEY_TYPE}" = "true" ] && [ "$sig_ok" = "pass" ]; then
+              raw_status=$(git log -1 --format='%GG' --end-of-options "$commit")
+
+              if echo "$raw_status" | grep -qi "ED25519-SK"; then
+                key_type_value="sk-ssh-ed25519"
+              else
+                key_type_value=$(echo "$raw_status" | grep -oP 'with \K\S+(?= key)' || echo "unknown")
+                committer=$(git log -1 --format='%cn (%ce)' --end-of-options "$commit")
+                echo "::error::Commit ${short} from $committer was signed with ${key_type_value} (required: sk-ssh-ed25519)."
+                key_type_ok="fail"
+                overall_failed=1
+              fi
+            elif [ "${ENFORCE_KEY_TYPE}" != "true" ]; then
+              key_type_ok="skip"
+              key_type_value="not enforced"
+            fi
+
+            # Build table row with emoji status icons
+            if [ "$sig_ok" = "pass" ]; then sig_icon="✅"; else sig_icon="❌"; fi
+            if [ "$key_type_ok" = "pass" ]; then kt_icon="✅"; elif [ "$key_type_ok" = "skip" ]; then kt_icon="➖"; else kt_icon="❌"; fi
+
+            table_rows="${table_rows}| \`${short}\` | ${author} | ${sig_icon} | ${key_type_value} | ${kt_icon} |
+          "
+          done
+
+          # Build Job Summary and PR Comment body
+          {
+            echo "## 🔐 Commit Signature Verification"
+            echo ""
+
+            if [ "$overall_failed" -eq 0 ]; then
+              echo "✅ **All ${commit_count} commit(s) passed verification**"
+            else
+              echo "❌ **One or more commits failed verification**"
+            fi
+            echo ""
+
+            echo "| Commit | Author | Signature | Key Type | Key Check |"
+            echo "|--------|--------|-----------|----------|-----------|"
+            echo "$table_rows"
+
+            echo ""
+            echo "### Summary"
+            if [ "$overall_failed" -eq 0 ]; then
+              echo "- **Commits verified**: ${commit_count}"
+              echo "- **Signature check**: ✅ All passed"
+              if [ "${ENFORCE_KEY_TYPE}" = "true" ]; then
+                echo "- **Key type enforcement**: ✅ All sk-ssh-ed25519"
+              else
+                echo "- **Key type enforcement**: ➖ Disabled"
+              fi
+            else
+              echo "- **Commits verified**: ${commit_count}"
+              echo "- **Result**: ❌ Failures detected (see table above)"
+            fi
+
+            echo ""
+            echo "---"
+            if [ "${ENFORCE_KEY_TYPE}" = "true" ]; then
+              echo "*Required key type: \`sk-ssh-ed25519\` (FIDO2 hardware key)*"
+            else
+              echo "*Key type enforcement is disabled.*"
+            fi
+          } | tee -a "$GITHUB_STEP_SUMMARY" > /tmp/pr-comment-body.md
+
+          # Add timestamp and marker for PR comment
+          {
+            echo ""
+            echo "*Last verified: $(date -u '+%Y-%m-%d %H:%M UTC')*"
+            echo ""
+            echo "<!-- babylon-commit-auth -->"
+          } >> /tmp/pr-comment-body.md
+
+          if [ "$overall_failed" -eq 1 ]; then
+            echo "::error::One or more commits failed signature verification."
+            exit 1
+          fi
+
+          echo "All $commit_count commit(s) passed verification."
+
+      - name: Post or update PR comment
+        if: always() && github.event.pull_request.number
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+
+          if [ ! -f /tmp/pr-comment-body.md ]; then
+            echo "No comment body found, skipping PR comment."
+            exit 0
+          fi
+
+          COMMENT_MARKER="<!-- babylon-commit-auth -->"
+
+          # Find existing comment by marker
+          existing_comment_id=$(gh api \
+            "repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" \
+            --jq ".[] | select(.body | contains(\"${COMMENT_MARKER}\")) | .id" \
+            | head -n 1 || { echo "::warning::Failed to query existing PR comments; will create new comment." >&2; true; })
+
+          if [ -n "$existing_comment_id" ]; then
+            echo "Updating existing comment (ID: ${existing_comment_id})..."
+            gh api \
+              --method PATCH \
+              "repos/${{ github.repository }}/issues/comments/${existing_comment_id}" \
+              -f body="$(cat /tmp/pr-comment-body.md)"
+          else
+            echo "Creating new comment..."
+            gh pr comment "${PR_NUMBER}" --body-file /tmp/pr-comment-body.md
+          fi
