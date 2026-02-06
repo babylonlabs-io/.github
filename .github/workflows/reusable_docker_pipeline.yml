@@ -46,11 +46,6 @@ on:
         description: 'Enable authentication for private Vault private repositories'
         type: boolean
         default: false
-      platforms:
-        required: false
-        type: string
-        description: "Target platforms for Docker build"
-        default: "linux/amd64,linux/arm64"
       docker_scan:
         required: false
         type: boolean
@@ -101,6 +96,11 @@ on:
         type: number
         description: 'Job timeout in minutes'
         default: 60
+      disable_arm64:
+        required: false
+        type: boolean
+        description: 'Disable ARM64 builds'
+        default: false
 
 # For github OIDC authentication to AWS
 permissions:
@@ -114,6 +114,7 @@ jobs:
     timeout-minutes: ${{ inputs.timeout_minutes }}
     outputs:
       image-name: ${{ steps.set_image_name.outputs.IMAGE_NAME }}
+      matrix: ${{ steps.set_matrix.outputs.MATRIX }}
     steps:
       - name: Determine image name
         id: set_image_name
@@ -122,6 +123,15 @@ jobs:
             echo "IMAGE_NAME=${{ inputs.repoName }}" >> $GITHUB_OUTPUT
           else
             echo "IMAGE_NAME=$(echo $GITHUB_REPOSITORY | cut -d '/' -f 2)" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Set build matrix
+        id: set_matrix
+        run: |
+          if [ "${{ inputs.disable_arm64 }}" == "true" ]; then
+            echo 'MATRIX={"include":[{"platform":"linux/amd64","runner":"${{ inputs.runs_on_amd64 }}"}]}' >> $GITHUB_OUTPUT
+          else
+            echo 'MATRIX={"include":[{"platform":"linux/amd64","runner":"${{ inputs.runs_on_amd64 }}"},{"platform":"linux/arm64","runner":"${{ inputs.runs_on_arm64 }}"}]}' >> $GITHUB_OUTPUT
           fi
 
   dockerfile_lint:
@@ -169,18 +179,7 @@ jobs:
       - dockerfile_lint
     strategy:
       fail-fast: false
-      matrix:
-        platform:
-          - linux/amd64
-          - linux/arm64
-        runner:
-          - ${{ inputs.runs_on_amd64 }}
-          - ${{ inputs.runs_on_arm64 }}
-        exclude:
-        - platform: linux/amd64
-          runner: ${{ inputs.runs_on_arm64 }}
-        - platform: linux/arm64
-          runner: ${{ inputs.runs_on_amd64 }}
+      matrix: ${{ fromJSON(needs.prepare-metadata.outputs.matrix) }}
     steps:
       - name: Prepare
         run: |
