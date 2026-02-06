@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+## 0.17.0
+- Allow disabling arm64 Docker build 
+
 ## 0.16.1
 - Re-add dockerfile_lint as a dependency of docker_build to block image publishing on lint failures
 
