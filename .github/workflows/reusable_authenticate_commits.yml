@@ -38,7 +38,32 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      - name: Identify PR author
+        id: pr-author
+        env:
+          PR_USER_LOGIN: ${{ github.event.pull_request.user.login }}
+          PR_USER_ID: ${{ github.event.pull_request.user.id }}
+          PR_USER_TYPE: ${{ github.event.pull_request.user.type }}
+        run: |
+          set -euo pipefail
+          # Verify Dependabot via three independent signals:
+          #   1. login: 'dependabot[bot]' — official GitHub recommendation, [bot] suffix reserved for GitHub Apps
+          #   2. user ID: 49699333 — Dependabot's immutable canonical ID
+          #   3. user type: 'Bot' — GitHub API user type, platform-enforced
+          # Using github.event.pull_request.user (PR creator) NOT github.actor (workflow trigger),
+          # because github.actor changes if a human pushes to the Dependabot branch.
+          if [ "${PR_USER_LOGIN:-}" = "dependabot[bot]" ] && \
+             [ "${PR_USER_ID:-0}" = "49699333" ] && \
+             [ "${PR_USER_TYPE:-}" = "Bot" ]; then
+            echo "is_dependabot=true" >> "$GITHUB_OUTPUT"
+            echo "PR author verified as GitHub Dependabot (login: ${PR_USER_LOGIN}, ID: ${PR_USER_ID}, Type: ${PR_USER_TYPE})"
+          else
+            echo "is_dependabot=false" >> "$GITHUB_OUTPUT"
+            echo "PR author: login=${PR_USER_LOGIN:-unknown}, ID=${PR_USER_ID:-unknown}, Type=${PR_USER_TYPE:-unknown}"
+          fi
+
       - name: Import allowed SSH keys
+        if: steps.pr-author.outputs.is_dependabot != 'true'
         env:
           ALLOWED_SIGNERS: ${{ vars.BABYLON_ALLOWED_SIGNERS }}
         run: |
@@ -52,6 +77,7 @@ jobs:
           git config --global gpg.ssh.allowedSignersFile ~/.ssh/allowed_signers
 
       - name: Validate commit signatures
+        if: steps.pr-author.outputs.is_dependabot != 'true'
         env:
           HEAD_SHA: ${{ inputs.head_sha || github.event.pull_request.head.sha }}
           BASE_SHA: ${{ inputs.base_sha || github.event.pull_request.base.sha }}
@@ -183,6 +209,113 @@ jobs:
           fi
 
           echo "All $commit_count commit(s) passed verification."
+
+      - name: Verify Dependabot commit signatures (GPG)
+        if: steps.pr-author.outputs.is_dependabot == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ inputs.head_sha || github.event.pull_request.head.sha }}
+          BASE_SHA: ${{ inputs.base_sha || github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+
+          validate_sha() {
+            if ! [[ "$1" =~ ^[a-fA-F0-9]{40}$ ]]; then
+              echo "::error::Invalid SHA format: $1"
+              exit 1
+            fi
+          }
+
+          validate_sha "$HEAD_SHA"
+          validate_sha "$BASE_SHA"
+
+          commits=$(git rev-list --end-of-options "${BASE_SHA}".."${HEAD_SHA}" || true)
+          if [ -z "$commits" ]; then
+            echo "No commits to verify in range ${BASE_SHA:0:12}..${HEAD_SHA:0:12}."
+            {
+              echo "## 🔐 Commit Signature Verification (Dependabot)"
+              echo ""
+              echo "No commits found in range \`${BASE_SHA:0:12}\`..\`${HEAD_SHA:0:12}\`."
+            } | tee -a "$GITHUB_STEP_SUMMARY" > /tmp/pr-comment-body.md
+            echo "" >> /tmp/pr-comment-body.md
+            echo "<!-- babylon-commit-auth -->" >> /tmp/pr-comment-body.md
+            exit 0
+          fi
+
+          commit_count=$(echo "$commits" | wc -l | tr -d ' ')
+          echo "Verifying $commit_count Dependabot commit(s) via GitHub API..."
+
+          overall_failed=0
+          table_rows=""
+
+          for commit in $commits; do
+            short="${commit:0:12}"
+            author=$(git log -1 --format='%an' --end-of-options "$commit")
+
+            # Verify commit signature via GitHub API (non-spoofable)
+            api_response=$(gh api "repos/${{ github.repository }}/git/commits/${commit}" \
+              --jq '{verified: .verification.verified, reason: .verification.reason}')
+            verified=$(echo "$api_response" | jq -r '.verified')
+            reason=$(echo "$api_response" | jq -r '.reason')
+
+            if [ "$verified" = "true" ] && [ "$reason" = "valid" ]; then
+              sig_icon="✅"
+              echo "Commit ${short}: GPG verified by GitHub (reason: ${reason})"
+            else
+              sig_icon="❌"
+              echo "::error::Dependabot commit ${short} failed GPG verification (verified: ${verified}, reason: ${reason})"
+              overall_failed=1
+            fi
+
+            table_rows="${table_rows}| \`${short}\` | ${author} | ${sig_icon} | GPG (GitHub) | ➖ |
+          "
+          done
+
+          {
+            echo "## 🔐 Commit Signature Verification (Dependabot)"
+            echo ""
+
+            if [ "$overall_failed" -eq 0 ]; then
+              echo "✅ **All ${commit_count} Dependabot commit(s) passed GPG verification**"
+            else
+              echo "❌ **One or more Dependabot commits failed GPG verification**"
+            fi
+            echo ""
+
+            echo "| Commit | Author | Signature | Key Type | Key Check |"
+            echo "|--------|--------|-----------|----------|-----------|"
+            echo "$table_rows"
+
+            echo ""
+            echo "### Summary"
+            if [ "$overall_failed" -eq 0 ]; then
+              echo "- **Commits verified**: ${commit_count}"
+              echo "- **Author**: Dependabot (verified via GitHub API, user ID: 49699333)"
+              echo "- **Signature check**: ✅ All GPG-verified by GitHub"
+              echo "- **Key type enforcement**: ➖ Not applicable (bot commits use GitHub GPG signing)"
+            else
+              echo "- **Commits verified**: ${commit_count}"
+              echo "- **Result**: ❌ Failures detected (see table above)"
+            fi
+
+            echo ""
+            echo "---"
+            echo "*Dependabot commits are GPG-signed by GitHub and verified via the GitHub API.*"
+          } | tee -a "$GITHUB_STEP_SUMMARY" > /tmp/pr-comment-body.md
+
+          {
+            echo ""
+            echo "*Last verified: $(date -u '+%Y-%m-%d %H:%M UTC')*"
+            echo ""
+            echo "<!-- babylon-commit-auth -->"
+          } >> /tmp/pr-comment-body.md
+
+          if [ "$overall_failed" -eq 1 ]; then
+            echo "::error::One or more Dependabot commits failed GPG verification."
+            exit 1
+          fi
+
+          echo "All $commit_count Dependabot commit(s) passed GPG verification."
 
       - name: Post or update PR comment
         if: always() && github.event.pull_request.number
