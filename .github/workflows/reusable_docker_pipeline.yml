@@ -200,7 +200,7 @@ jobs:
         id: fs-scan
         if: inputs.docker_scan && matrix.platform == 'linux/amd64'
         continue-on-error: true
-        uses: aquasecurity/trivy-action@0.33.1
+        uses: aquasecurity/trivy-action@0.34.1
         with:
           scan-type: 'fs'
           scan-ref: '.'
@@ -211,13 +211,14 @@ jobs:
           vuln-type: 'library'
           severity: 'CRITICAL'
           trivyignores: ${{ hashFiles('.trivyignore') != '' && '.trivyignore' || '' }}
+	  version: v0.69.2 # https://github.com/aquasecurity/trivy-action/issues/512
 
       # Filesystem secret scan - catches leaked credentials in source code before build
       - name: Run Trivy filesystem secret scan
         id: fs-secret-scan
         if: inputs.docker_scan && matrix.platform == 'linux/amd64'
         continue-on-error: true
-        uses: aquasecurity/trivy-action@0.33.1
+        uses: aquasecurity/trivy-action@0.34.1
         with:
           scan-type: 'fs'
           scan-ref: '.'
@@ -226,7 +227,8 @@ jobs:
           output: 'trivy-fs-secrets.txt'
           exit-code: '1'
           severity: 'CRITICAL,HIGH'
-          secret-config: ${{ inputs.secret_config }}
+          secret-config: ${{ $inputs.secret_config }}
+	  version: v0.69.2 # https://github.com/aquasecurity/trivy-action/issues/512
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
