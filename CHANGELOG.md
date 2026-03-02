@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+## 0.17.1
+- Bump trivy-action version
+
 ## 0.17.0
 - Allow disabling arm64 Docker build 
 

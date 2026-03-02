@@ -200,7 +200,7 @@ jobs:
         id: fs-scan
         if: inputs.docker_scan && matrix.platform == 'linux/amd64'
         continue-on-error: true
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@0.33.1
         with:
           scan-type: 'fs'
           scan-ref: '.'
@@ -217,7 +217,7 @@ jobs:
         id: fs-secret-scan
         if: inputs.docker_scan && matrix.platform == 'linux/amd64'
         continue-on-error: true
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@0.33.1
         with:
           scan-type: 'fs'
           scan-ref: '.'
