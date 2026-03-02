@@ -313,7 +313,7 @@ jobs:
         id: image-scan
         if: inputs.docker_scan
         continue-on-error: true
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@0.34.1
         with:
           image-ref: 'local-scan:${{ github.sha }}'
           format: 'table'
@@ -323,13 +323,14 @@ jobs:
           vuln-type: 'os,library'
           severity: 'CRITICAL'
           trivyignores: ${{ hashFiles('.trivyignore') != '' && '.trivyignore' || '' }}
+          version: v0.69.2 # https://github.com/aquasecurity/trivy-action/issues/512
 
       # Image secret scan - catches leaked credentials baked into Docker layers
       - name: Run Trivy image secret scan
         id: image-secret-scan
         if: inputs.docker_scan
         continue-on-error: true
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@0.34.1
         with:
           image-ref: 'local-scan:${{ github.sha }}'
           scanners: 'secret'
@@ -338,6 +339,7 @@ jobs:
           exit-code: '1'
           severity: 'CRITICAL,HIGH'
           secret-config: ${{ inputs.secret_config }}
+          version: v0.69.2 # https://github.com/aquasecurity/trivy-action/issues/512
 
       # Write scan results to Job Summary
       - name: Add scan results to Job Summary
