@@ -233,45 +233,6 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Login to Docker Hub
-        uses: docker/login-action@v3
-        if: inputs.publish && inputs.push_to_dockerhub
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        if: inputs.publish && inputs.push_to_ecr
-        with:
-          role-to-assume: arn:aws:iam::${{ vars.AWS_ECR_ACCOUNT }}:role/gha-ecr-push
-          role-session-name: gh-docker-build-${{ github.run_id }}
-          aws-region: ${{ vars.AWS_ECR_REGION }}
-
-      - name: Login to Amazon ECR
-        if: inputs.publish && inputs.push_to_ecr
-        run: |
-          aws ecr get-login-password --region ${{ vars.AWS_ECR_REGION }} | docker login --username AWS --password-stdin ${{ vars.AWS_ECR_REGISTRY_ID }}
-
-      - name: Create ECR repository if not exists
-        if: inputs.publish && inputs.push_to_ecr
-        env:
-          AWS_REGION: ${{ vars.AWS_ECR_REGION }}
-          REPOSITORY_NAME: ${{ needs.prepare-metadata.outputs.image-name }}
-        run: |
-          # Check if repository exists
-          if ! aws ecr describe-repositories --repository-names "${REPOSITORY_NAME}" --region "${AWS_REGION}" > /dev/null 2>&1; then
-            echo "Repository ${REPOSITORY_NAME} does not exist. Creating..."
-            aws ecr create-repository \
-              --repository-name "${REPOSITORY_NAME}" \
-              --region "${AWS_REGION}" \
-              --image-scanning-configuration scanOnPush=true \
-              --image-tag-mutability IMMUTABLE
-            echo "Repository ${REPOSITORY_NAME} created successfully"
-          else
-            echo "Repository ${REPOSITORY_NAME} already exists"
-          fi
-
       # This block is used to not hard-coded the secrets in Build Docker image
       # Secrets are only added when necessary
       - name: Generate and mask build secrets
@@ -293,7 +254,7 @@ jobs:
       # Build image locally for scanning (not pushed yet)
       - name: Build image for scanning
         id: build-local
-        if: inputs.docker_scan
+        if: inputs.docker_scan || inputs.publish
         uses: docker/build-push-action@v6
         with:
           platforms: ${{ matrix.platform }}
@@ -484,93 +445,85 @@ jobs:
           category: trivy-fs-${{ env.PLATFORM_PAIR }}
 
       # ===========================================
-      # PUSH TO REGISTRIES (only after scans pass)
+      # EXPORT IMAGE ARTIFACT (after scans pass)
       # ===========================================
 
-      - name: Build and push to Docker Hub
-        id: build-dockerhub
-        if: inputs.publish && inputs.push_to_dockerhub
-        uses: docker/build-push-action@v6
-        with:
-          platforms: ${{ matrix.platform }}
-          context: ${{ inputs.dockerContext }}
-          file: ${{ inputs.dockerfile }}
-          build-args: |
-            ${{ inputs.buildArgs }}
-          secrets: |
-            ${{ steps.set-build-secrets.outputs.SECRETS }}
-          cache-from: type=gha
-          outputs: type=image,name=${{ vars.DOCKERHUB_REGISTRY_ID || 'babylonlabs' }}/${{ needs.prepare-metadata.outputs.image-name }},push-by-digest=true,push=${{ inputs.publish }}
-
-      - name: Build and push to ECR
-        id: build-ecr
-        if: inputs.publish && inputs.push_to_ecr
-        uses: docker/build-push-action@v6
-        with:
-          platforms: ${{ matrix.platform }}
-          context: ${{ inputs.dockerContext }}
-          file: ${{ inputs.dockerfile }}
-          build-args: |
-            ${{ inputs.buildArgs }}
-          secrets: |
-            ${{ steps.set-build-secrets.outputs.SECRETS }}
-          cache-from: type=gha
-          outputs: type=image,name=${{ vars.AWS_ECR_REGISTRY_ID || 'babylonlabs' }}/${{ needs.prepare-metadata.outputs.image-name }},push-by-digest=true,push=${{ inputs.publish }}
-
-      - name: Export digest Docker Hub
-        if: inputs.publish && inputs.push_to_dockerhub
+      - name: Export image artifact
+        if: inputs.publish
         run: |
-          mkdir -p /tmp/digests/dockerhub
-          digest="${{ steps.build-dockerhub.outputs.digest }}"
-          echo "$digest" > "/tmp/digests/dockerhub/${digest#sha256:}"
+          skopeo copy docker-daemon:local-scan:${{ github.sha }} oci-archive:/tmp/image-${{ env.PLATFORM_PAIR }}.tar
 
-      - name: Export digest ECR
-        if: inputs.publish && inputs.push_to_ecr
-        run: |
-          mkdir -p /tmp/digests/ecr
-          digest="${{ steps.build-ecr.outputs.digest }}"
-          echo "$digest" > "/tmp/digests/ecr/${digest#sha256:}"
-
-      - name: Upload Docker Hub digest
-        if: inputs.publish && inputs.push_to_dockerhub
+      - name: Upload image artifact
+        if: inputs.publish
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ inputs.buildArtifactPrefix }}digests-dockerhub-${{ needs.prepare-metadata.outputs.image-name }}-${{ env.PLATFORM_PAIR }}
-          path: /tmp/digests/dockerhub/*
+          name: ${{ inputs.buildArtifactPrefix }}image-${{ needs.prepare-metadata.outputs.image-name }}-${{ env.PLATFORM_PAIR }}
+          path: /tmp/image-${{ env.PLATFORM_PAIR }}.tar
           if-no-files-found: error
           retention-days: 1
 
-      - name: Upload ECR digest
-        if: inputs.publish && inputs.push_to_ecr
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ inputs.buildArtifactPrefix }}digests-ecr-${{ needs.prepare-metadata.outputs.image-name }}-${{ env.PLATFORM_PAIR }}
-          path: /tmp/digests/ecr/*
-          if-no-files-found: error
-          retention-days: 1
-
-  merge_dockerhub:
+  docker_push:
     runs-on: ${{ inputs.runs_on_amd64 }}
     timeout-minutes: ${{ inputs.timeout_minutes }}
-    if: inputs.publish && inputs.push_to_dockerhub
+    if: inputs.publish && (inputs.push_to_dockerhub || inputs.push_to_ecr)
     needs:
       - docker_build
       - prepare-metadata
     outputs:
-      dockerhub_imgver: ${{ steps.meta.outputs.version }}
+      dockerhub_imgver: ${{ steps.meta-dockerhub.outputs.version }}
+      ecr_imgver: ${{ steps.meta-ecr.outputs.version }}
     steps:
-      - name: Download digests
+      - name: Download image artifacts
         uses: actions/download-artifact@v4
         with:
-          path: /tmp/digests
-          pattern: ${{ inputs.buildArtifactPrefix }}digests-dockerhub-${{ needs.prepare-metadata.outputs.image-name }}-*
-          merge-multiple: true
+          path: /tmp/images
+          pattern: ${{ inputs.buildArtifactPrefix }}image-${{ needs.prepare-metadata.outputs.image-name }}-*
+          merge-multiple: false
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Docker meta
-        id: meta
+      - name: Login to Docker Hub
+        if: inputs.push_to_dockerhub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Configure AWS credentials
+        if: inputs.push_to_ecr
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ vars.AWS_ECR_ACCOUNT }}:role/gha-ecr-push
+          role-session-name: gh-docker-build-${{ github.run_id }}
+          aws-region: ${{ vars.AWS_ECR_REGION }}
+
+      - name: Login to Amazon ECR
+        if: inputs.push_to_ecr
+        run: |
+          aws ecr get-login-password --region ${{ vars.AWS_ECR_REGION }} | docker login --username AWS --password-stdin ${{ vars.AWS_ECR_REGISTRY_ID }}
+
+      - name: Create ECR repository if not exists
+        if: inputs.push_to_ecr
+        env:
+          AWS_REGION: ${{ vars.AWS_ECR_REGION }}
+          REPOSITORY_NAME: ${{ needs.prepare-metadata.outputs.image-name }}
+        run: |
+          if ! aws ecr describe-repositories --repository-names "${REPOSITORY_NAME}" --region "${AWS_REGION}" > /dev/null 2>&1; then
+            echo "Repository ${REPOSITORY_NAME} does not exist. Creating..."
+            aws ecr create-repository \
+              --repository-name "${REPOSITORY_NAME}" \
+              --region "${AWS_REGION}" \
+              --image-scanning-configuration scanOnPush=true \
+              --image-tag-mutability IMMUTABLE
+            echo "Repository ${REPOSITORY_NAME} created successfully"
+          else
+            echo "Repository ${REPOSITORY_NAME} already exists"
+          fi
+
+      - name: Docker meta (DockerHub)
+        id: meta-dockerhub
+        if: inputs.push_to_dockerhub
         uses: docker/metadata-action@v5
         with:
           images: ${{ vars.DOCKERHUB_REGISTRY_ID }}/${{ needs.prepare-metadata.outputs.image-name }}
@@ -581,48 +534,9 @@ jobs:
             type=ref,enable=${{ !inputs.imageTag }},priority=200,prefix=,suffix=,event=tag
             type=raw,enable=${{ !!inputs.imageTag }},priority=300,value=${{ inputs.imageTag }}
 
-      - name: Login to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - name: Create manifest list and push
-        working-directory: /tmp/digests
-        run: |
-          first_tag=$(jq -r '.tags[0] // empty' <<< "$DOCKER_METADATA_OUTPUT_JSON")
-          if [ -z "$first_tag" ]; then
-            echo "No tag found in DOCKER_METADATA_OUTPUT_JSON"; exit 1
-          fi
-          digests=$(printf "${{ vars.DOCKERHUB_REGISTRY_ID }}/${{ needs.prepare-metadata.outputs.image-name }}@sha256:%s " $(ls /tmp/digests))
-          docker buildx imagetools create -t "$first_tag" $digests
-
-      - name: Inspect image
-        run: |
-          docker buildx imagetools inspect ${{ vars.DOCKERHUB_REGISTRY_ID }}/${{ needs.prepare-metadata.outputs.image-name }}:${{ steps.meta.outputs.version }}
-
-  merge_ecr:
-    runs-on: ${{ inputs.runs_on_amd64 }}
-    timeout-minutes: ${{ inputs.timeout_minutes }}
-    if: inputs.publish && inputs.push_to_ecr
-    needs:
-      - docker_build
-      - prepare-metadata
-    outputs:
-      ecr_imgver: ${{ steps.meta.outputs.version }}
-    steps:
-      - name: Download digests
-        uses: actions/download-artifact@v4
-        with:
-          path: /tmp/digests
-          pattern: ${{ inputs.buildArtifactPrefix }}digests-ecr-${{ needs.prepare-metadata.outputs.image-name }}-*
-          merge-multiple: true
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Docker meta
-        id: meta
+      - name: Docker meta (ECR)
+        id: meta-ecr
+        if: inputs.push_to_ecr
         uses: docker/metadata-action@v5
         with:
           images: ${{ vars.AWS_ECR_REGISTRY_ID }}/${{ needs.prepare-metadata.outputs.image-name }}
@@ -633,29 +547,36 @@ jobs:
             type=ref,enable=${{ !inputs.imageTag }},priority=200,prefix=,suffix=,event=tag
             type=raw,enable=${{ !!inputs.imageTag }},priority=300,value=${{ inputs.imageTag }}
 
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        if: inputs.publish && inputs.push_to_ecr
-        with:
-          role-to-assume: arn:aws:iam::${{ vars.AWS_ECR_ACCOUNT }}:role/gha-ecr-push
-          role-session-name: gh-docker-build-${{ github.run_id }}
-          aws-region: ${{ vars.AWS_ECR_REGION }}
-
-      - name: Login to Amazon ECR
-        if: inputs.publish && inputs.push_to_ecr
+      - name: Convert OCI archives to OCI layout
         run: |
-          aws ecr get-login-password --region ${{ vars.AWS_ECR_REGION }} | docker login --username AWS --password-stdin ${{ vars.AWS_ECR_REGISTRY_ID }}
+          for tarball in /tmp/images/*/*.tar; do
+            PLATFORM_PAIR=$(basename "$tarball" .tar | sed 's/^image-//')
+            echo "Converting $PLATFORM_PAIR to OCI layout"
+            skopeo copy oci-archive:"$tarball" oci:/tmp/oci/$PLATFORM_PAIR:latest
+          done
+          OCI_REFS=$(find /tmp/oci -mindepth 1 -maxdepth 1 -type d | sort | xargs -I{} echo "oci-layout://{}:latest" | tr '\n' ' ')
+          echo "OCI_REFS=$OCI_REFS" >> $GITHUB_ENV
 
-      - name: Create manifest list and push
-        working-directory: /tmp/digests/
+      - name: Create manifest list and push to Docker Hub
+        if: inputs.push_to_dockerhub
         run: |
-          first_tag=$(jq -r '.tags[0] // empty' <<< "$DOCKER_METADATA_OUTPUT_JSON")
-          if [ -z "$first_tag" ]; then
-            echo "No tag found in DOCKER_METADATA_OUTPUT_JSON"; exit 1
-          fi
-          digests=$(printf "${{ vars.AWS_ECR_REGISTRY_ID }}/${{ needs.prepare-metadata.outputs.image-name }}@sha256:%s " $(ls /tmp/digests))
-          docker buildx imagetools create -t "$first_tag" $digests
+          docker buildx imagetools create \
+            -t "${{ vars.DOCKERHUB_REGISTRY_ID }}/${{ needs.prepare-metadata.outputs.image-name }}:${{ steps.meta-dockerhub.outputs.version }}" \
+            $OCI_REFS
 
-      - name: Inspect image
+      - name: Inspect Docker Hub image
+        if: inputs.push_to_dockerhub
         run: |
-          docker buildx imagetools inspect ${{ vars.AWS_ECR_REGISTRY_ID }}/${{ needs.prepare-metadata.outputs.image-name }}:${{ steps.meta.outputs.version }}
+          docker buildx imagetools inspect ${{ vars.DOCKERHUB_REGISTRY_ID }}/${{ needs.prepare-metadata.outputs.image-name }}:${{ steps.meta-dockerhub.outputs.version }}
+
+      - name: Create manifest list and push to ECR
+        if: inputs.push_to_ecr
+        run: |
+          docker buildx imagetools create \
+            -t "${{ vars.AWS_ECR_REGISTRY_ID }}/${{ needs.prepare-metadata.outputs.image-name }}:${{ steps.meta-ecr.outputs.version }}" \
+            $OCI_REFS
+
+      - name: Inspect ECR image
+        if: inputs.push_to_ecr
+        run: |
+          docker buildx imagetools inspect ${{ vars.AWS_ECR_REGISTRY_ID }}/${{ needs.prepare-metadata.outputs.image-name }}:${{ steps.meta-ecr.outputs.version }}
