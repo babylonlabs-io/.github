@@ -425,7 +425,7 @@ jobs:
       - name: Run Trivy filesystem scan (SARIF)
         id: sarif-scan
         if: inputs.docker_scan && matrix.platform == 'linux/amd64' && github.event.repository.visibility == 'public'
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@0.34.1
         with:
           scan-type: 'fs'
           scan-ref: '.'
@@ -436,6 +436,7 @@ jobs:
           vuln-type: 'library'
           severity: 'CRITICAL,HIGH,MEDIUM'
           trivyignores: ${{ hashFiles('.trivyignore') != '' && '.trivyignore' || '' }}
+          version: v0.69.2 # https://github.com/aquasecurity/trivy-action/issues/512
 
       - name: Upload SARIF to GitHub Security tab
         if: inputs.docker_scan && matrix.platform == 'linux/amd64' && github.event.repository.visibility == 'public' && steps.sarif-scan.outcome == 'success'
