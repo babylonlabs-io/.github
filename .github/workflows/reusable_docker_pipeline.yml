@@ -550,6 +550,7 @@ jobs:
 
       - name: Convert OCI archives to OCI layout
         run: |
+          mkdir -p /tmp/oci
           for tarball in /tmp/images/*/*.tar; do
             PLATFORM_PAIR=$(basename "$tarball" .tar | sed 's/^image-//')
             echo "Converting $PLATFORM_PAIR to OCI layout"
