@@ -254,7 +254,6 @@ jobs:
       # Build image locally for scanning (not pushed yet)
       - name: Build image for scanning
         id: build-local
-        if: inputs.docker_scan
         uses: docker/build-push-action@v6
         with:
           platforms: ${{ matrix.platform }}
@@ -469,67 +468,19 @@ jobs:
         run: |
           aws ecr get-login-password --region ${{ vars.AWS_ECR_REGION }} | docker login --username AWS --password-stdin ${{ vars.AWS_ECR_REGISTRY_ID }}
 
-      - name: Build and push to Docker Hub
-        id: build-dockerhub
-        if: inputs.publish && inputs.push_to_dockerhub
-        uses: docker/build-push-action@v6
-        with:
-          platforms: ${{ matrix.platform }}
-          context: ${{ inputs.dockerContext }}
-          file: ${{ inputs.dockerfile }}
-          build-args: |
-            ${{ inputs.buildArgs }}
-          secrets: |
-            ${{ steps.set-build-secrets.outputs.SECRETS }}
-          cache-from: type=gha
-          outputs: type=image,name=${{ vars.DOCKERHUB_REGISTRY_ID || 'babylonlabs' }}/${{ needs.prepare-metadata.outputs.image-name }},push-by-digest=true,push=true
-
-      - name: Build and push to ECR
-        id: build-ecr
-        if: inputs.publish && inputs.push_to_ecr
-        uses: docker/build-push-action@v6
-        with:
-          platforms: ${{ matrix.platform }}
-          context: ${{ inputs.dockerContext }}
-          file: ${{ inputs.dockerfile }}
-          build-args: |
-            ${{ inputs.buildArgs }}
-          secrets: |
-            ${{ steps.set-build-secrets.outputs.SECRETS }}
-          cache-from: type=gha
-          outputs: type=image,name=${{ vars.AWS_ECR_REGISTRY_ID || 'babylonlabs' }}/${{ needs.prepare-metadata.outputs.image-name }},push-by-digest=true,push=true
-
-      - name: Export digest Docker Hub
+      - name: Push to Docker Hub
         if: inputs.publish && inputs.push_to_dockerhub
         run: |
-          mkdir -p /tmp/digests/dockerhub
-          digest="${{ steps.build-dockerhub.outputs.digest }}"
-          echo "$digest" > "/tmp/digests/dockerhub/${digest#sha256:}"
+          REPO="${{ vars.DOCKERHUB_REGISTRY_ID || 'babylonlabs' }}/${{ needs.prepare-metadata.outputs.image-name }}"
+          docker tag "local-scan:${{ github.sha }}" "$REPO:${{ github.sha }}-${{ env.PLATFORM_PAIR }}"
+          docker push "$REPO:${{ github.sha }}-${{ env.PLATFORM_PAIR }}"
 
-      - name: Export digest ECR
+      - name: Push to ECR
         if: inputs.publish && inputs.push_to_ecr
         run: |
-          mkdir -p /tmp/digests/ecr
-          digest="${{ steps.build-ecr.outputs.digest }}"
-          echo "$digest" > "/tmp/digests/ecr/${digest#sha256:}"
-
-      - name: Upload Docker Hub digest
-        if: inputs.publish && inputs.push_to_dockerhub
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ inputs.buildArtifactPrefix }}digests-dockerhub-${{ needs.prepare-metadata.outputs.image-name }}-${{ env.PLATFORM_PAIR }}
-          path: /tmp/digests/dockerhub/*
-          if-no-files-found: error
-          retention-days: 1
-
-      - name: Upload ECR digest
-        if: inputs.publish && inputs.push_to_ecr
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ inputs.buildArtifactPrefix }}digests-ecr-${{ needs.prepare-metadata.outputs.image-name }}-${{ env.PLATFORM_PAIR }}
-          path: /tmp/digests/ecr/*
-          if-no-files-found: error
-          retention-days: 1
+          REPO="${{ vars.AWS_ECR_REGISTRY_ID }}/${{ needs.prepare-metadata.outputs.image-name }}"
+          docker tag "local-scan:${{ github.sha }}" "$REPO:${{ github.sha }}-${{ env.PLATFORM_PAIR }}"
+          docker push "$REPO:${{ github.sha }}-${{ env.PLATFORM_PAIR }}"
 
   merge_dockerhub:
     runs-on: ${{ inputs.runs_on_amd64 }}
@@ -541,13 +492,6 @@ jobs:
     outputs:
       dockerhub_imgver: ${{ steps.meta.outputs.version }}
     steps:
-      - name: Download digests
-        uses: actions/download-artifact@v4
-        with:
-          path: /tmp/digests
-          pattern: ${{ inputs.buildArtifactPrefix }}digests-dockerhub-${{ needs.prepare-metadata.outputs.image-name }}-*
-          merge-multiple: true
-
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -558,6 +502,7 @@ jobs:
           images: ${{ vars.DOCKERHUB_REGISTRY_ID }}/${{ needs.prepare-metadata.outputs.image-name }}
           # If inputs.imageTag is available, other tags will be ignored
           # Priority only affects the order of tag generation, not which tag is chosen
+          # e.g. babylonlabs/babylond:abc123sha (on push) or babylonlabs/babylond:v1.0.0 (on tag)
           tags: |
             type=sha,enable=${{ !inputs.imageTag }},priority=100,prefix=,suffix=,format=long
             type=ref,enable=${{ !inputs.imageTag }},priority=200,prefix=,suffix=,event=tag
@@ -570,14 +515,15 @@ jobs:
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Create manifest list and push
-        working-directory: /tmp/digests
         run: |
           first_tag=$(jq -r '.tags[0] // empty' <<< "$DOCKER_METADATA_OUTPUT_JSON")
           if [ -z "$first_tag" ]; then
             echo "No tag found in DOCKER_METADATA_OUTPUT_JSON"; exit 1
           fi
-          digests=$(printf "${{ vars.DOCKERHUB_REGISTRY_ID }}/${{ needs.prepare-metadata.outputs.image-name }}@sha256:%s " $(ls /tmp/digests))
-          docker buildx imagetools create -t "$first_tag" $digests
+          REPO="${{ vars.DOCKERHUB_REGISTRY_ID }}/${{ needs.prepare-metadata.outputs.image-name }}"
+          # e.g. babylonlabs/babylond:abc123sha-linux-amd64 babylonlabs/babylond:abc123sha-linux-arm64
+          source_tags=$(echo '${{ needs.prepare-metadata.outputs.matrix }}' | jq -r '.include[].platform | gsub("/"; "-")' | xargs -I{} echo "$REPO:${{ github.sha }}-{}" | tr '\n' ' ')
+          docker buildx imagetools create -t "$first_tag" $source_tags
 
       - name: Inspect image
         run: |
@@ -593,13 +539,6 @@ jobs:
     outputs:
       ecr_imgver: ${{ steps.meta.outputs.version }}
     steps:
-      - name: Download digests
-        uses: actions/download-artifact@v4
-        with:
-          path: /tmp/digests
-          pattern: ${{ inputs.buildArtifactPrefix }}digests-ecr-${{ needs.prepare-metadata.outputs.image-name }}-*
-          merge-multiple: true
-
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -610,6 +549,7 @@ jobs:
           images: ${{ vars.AWS_ECR_REGISTRY_ID }}/${{ needs.prepare-metadata.outputs.image-name }}
           flavor: |
             latest=false
+          # e.g. 123456789.dkr.ecr.us-east-1.amazonaws.com/babylond:abc123sha (on push) or .../babylond:v1.0.0 (on tag)
           tags: |
             type=sha,enable=${{ !inputs.imageTag }},priority=100,prefix=,suffix=,format=long
             type=ref,enable=${{ !inputs.imageTag }},priority=200,prefix=,suffix=,event=tag
@@ -627,14 +567,15 @@ jobs:
           aws ecr get-login-password --region ${{ vars.AWS_ECR_REGION }} | docker login --username AWS --password-stdin ${{ vars.AWS_ECR_REGISTRY_ID }}
 
       - name: Create manifest list and push
-        working-directory: /tmp/digests
         run: |
           first_tag=$(jq -r '.tags[0] // empty' <<< "$DOCKER_METADATA_OUTPUT_JSON")
           if [ -z "$first_tag" ]; then
             echo "No tag found in DOCKER_METADATA_OUTPUT_JSON"; exit 1
           fi
-          digests=$(printf "${{ vars.AWS_ECR_REGISTRY_ID }}/${{ needs.prepare-metadata.outputs.image-name }}@sha256:%s " $(ls /tmp/digests))
-          docker buildx imagetools create -t "$first_tag" $digests
+          REPO="${{ vars.AWS_ECR_REGISTRY_ID }}/${{ needs.prepare-metadata.outputs.image-name }}"
+          # e.g. 123456789.dkr.ecr.us-east-1.amazonaws.com/babylond:abc123sha-linux-amd64 123456789.dkr.ecr.us-east-1.amazonaws.com/babylond:abc123sha-linux-arm64
+          source_tags=$(echo '${{ needs.prepare-metadata.outputs.matrix }}' | jq -r '.include[].platform | gsub("/"; "-")' | xargs -I{} echo "$REPO:${{ github.sha }}-{}" | tr '\n' ' ')
+          docker buildx imagetools create -t "$first_tag" $source_tags
 
       - name: Inspect image
         run: |
