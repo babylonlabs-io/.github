@@ -254,7 +254,7 @@ jobs:
       # Build image locally for scanning (not pushed yet)
       - name: Build image for scanning
         id: build-local
-        if: inputs.docker_scan || inputs.publish
+        if: inputs.docker_scan
         uses: docker/build-push-action@v6
         with:
           platforms: ${{ matrix.platform }}
@@ -462,9 +462,6 @@ jobs:
           platform=${{ matrix.platform }}
           echo "PLATFORM_PAIR=${platform//\//-}" >> $GITHUB_ENV
 
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -488,40 +485,6 @@ jobs:
         run: |
           aws ecr get-login-password --region ${{ vars.AWS_ECR_REGION }} | docker login --username AWS --password-stdin ${{ vars.AWS_ECR_REGISTRY_ID }}
 
-      - name: Create ECR repository if not exists
-        if: inputs.push_to_ecr
-        env:
-          AWS_REGION: ${{ vars.AWS_ECR_REGION }}
-          REPOSITORY_NAME: ${{ needs.prepare-metadata.outputs.image-name }}
-        run: |
-          if ! aws ecr describe-repositories --repository-names "${REPOSITORY_NAME}" --region "${AWS_REGION}" > /dev/null 2>&1; then
-            echo "Repository ${REPOSITORY_NAME} does not exist. Creating..."
-            aws ecr create-repository \
-              --repository-name "${REPOSITORY_NAME}" \
-              --region "${AWS_REGION}" \
-              --image-scanning-configuration scanOnPush=true \
-              --image-tag-mutability IMMUTABLE
-            echo "Repository ${REPOSITORY_NAME} created successfully"
-          else
-            echo "Repository ${REPOSITORY_NAME} already exists"
-          fi
-
-      - name: Generate and mask build secrets
-        id: set-build-secrets
-        run: |
-          SECRETS=""
-          if [ "${{ inputs.go-private-repos-authentication }}" == "true" ]; then
-            SECRETS+="GO_PRIVATE_TOKEN=${{ secrets.GO_PRIVATE_TOKEN }}\n"
-          fi
-          if [ "${{ inputs.private-repos-authentication }}" == "true" ]; then
-            SECRETS+="PRIVATE_REPO_TOKEN=${{ secrets.PRIVATE_REPO_TOKEN }}\n"
-          fi
-          echo "::add-mask::$SECRETS"
-          echo "SECRETS<<EOF" >> $GITHUB_OUTPUT
-          echo -e "$SECRETS" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
-        shell: bash
-
       - name: Build and push to Docker Hub
         id: build-dockerhub
         if: inputs.push_to_dockerhub
@@ -532,9 +495,6 @@ jobs:
           file: ${{ inputs.dockerfile }}
           build-args: |
             ${{ inputs.buildArgs }}
-          secrets: |
-            ${{ steps.set-build-secrets.outputs.SECRETS }}
-          provenance: false
           cache-from: type=gha
           outputs: type=image,name=${{ vars.DOCKERHUB_REGISTRY_ID || 'babylonlabs' }}/${{ needs.prepare-metadata.outputs.image-name }},push-by-digest=true,push=true
 
@@ -548,9 +508,6 @@ jobs:
           file: ${{ inputs.dockerfile }}
           build-args: |
             ${{ inputs.buildArgs }}
-          secrets: |
-            ${{ steps.set-build-secrets.outputs.SECRETS }}
-          provenance: false
           cache-from: type=gha
           outputs: type=image,name=${{ vars.AWS_ECR_REGISTRY_ID || 'babylonlabs' }}/${{ needs.prepare-metadata.outputs.image-name }},push-by-digest=true,push=true
 
