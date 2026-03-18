@@ -445,7 +445,7 @@ jobs:
           category: trivy-fs-${{ env.PLATFORM_PAIR }}
 
       # ===========================================
-      # PUSH TO REGISTRIES (same job as scan to guarantee scan-what-you-ship)
+      # PUSH TO REGISTRIES (only after scans pass)
       # ===========================================
 
       - name: Login to Docker Hub
