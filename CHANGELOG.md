@@ -5,6 +5,7 @@
 ## 0.18.0
 - reusable_docker_pipeline: push the scanned image to registry instead of rebuilding a new one
 - reusable_docker_pipeline: use image tag instead of digest when pushing images
+- reusable_docker_pipeline: remove ECR repository auto-creation
 
 ## 0.17.1
 - Bump trivy-action version

@@ -499,7 +499,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ vars.DOCKERHUB_REGISTRY_ID }}/${{ needs.prepare-metadata.outputs.image-name }}
+          images: ${{ vars.DOCKERHUB_REGISTRY_ID || 'babylonlabs' }}/${{ needs.prepare-metadata.outputs.image-name }}
           # If inputs.imageTag is available, other tags will be ignored
           # Priority only affects the order of tag generation, not which tag is chosen
           # e.g. babylonlabs/babylond:abc123sha (on push) or babylonlabs/babylond:v1.0.0 (on tag)
@@ -520,14 +520,14 @@ jobs:
           if [ -z "$first_tag" ]; then
             echo "No tag found in DOCKER_METADATA_OUTPUT_JSON"; exit 1
           fi
-          REPO="${{ vars.DOCKERHUB_REGISTRY_ID }}/${{ needs.prepare-metadata.outputs.image-name }}"
+          REPO="${{ vars.DOCKERHUB_REGISTRY_ID || 'babylonlabs' }}/${{ needs.prepare-metadata.outputs.image-name }}"
           # e.g. babylonlabs/babylond:abc123sha-linux-amd64 babylonlabs/babylond:abc123sha-linux-arm64
           source_tags=$(echo '${{ needs.prepare-metadata.outputs.matrix }}' | jq -r '.include[].platform | gsub("/"; "-")' | xargs -I{} echo "$REPO:${{ github.sha }}-{}" | tr '\n' ' ')
           docker buildx imagetools create -t "$first_tag" $source_tags
 
       - name: Inspect image
         run: |
-          docker buildx imagetools inspect ${{ vars.DOCKERHUB_REGISTRY_ID }}/${{ needs.prepare-metadata.outputs.image-name }}:${{ steps.meta.outputs.version }}
+          docker buildx imagetools inspect ${{ vars.DOCKERHUB_REGISTRY_ID || 'babylonlabs' }}/${{ needs.prepare-metadata.outputs.image-name }}:${{ steps.meta.outputs.version }}
 
   merge_ecr:
     runs-on: ${{ inputs.runs_on_amd64 }}
