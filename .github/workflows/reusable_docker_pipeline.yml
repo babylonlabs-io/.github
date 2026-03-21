@@ -200,7 +200,7 @@ jobs:
         id: fs-scan
         if: inputs.docker_scan && matrix.platform == 'linux/amd64'
         continue-on-error: true
-        uses: aquasecurity/trivy-action@0.34.1
+        uses: aquasecurity/trivy-action@v0.35.0
         with:
           scan-type: 'fs'
           scan-ref: '.'
@@ -218,7 +218,7 @@ jobs:
         id: fs-secret-scan
         if: inputs.docker_scan && matrix.platform == 'linux/amd64'
         continue-on-error: true
-        uses: aquasecurity/trivy-action@0.34.1
+        uses: aquasecurity/trivy-action@v0.35.0
         with:
           scan-type: 'fs'
           scan-ref: '.'
@@ -273,7 +273,7 @@ jobs:
         id: image-scan
         if: inputs.docker_scan
         continue-on-error: true
-        uses: aquasecurity/trivy-action@0.34.1
+        uses: aquasecurity/trivy-action@v0.35.0
         with:
           image-ref: 'local-scan:${{ github.sha }}'
           format: 'table'
@@ -290,7 +290,7 @@ jobs:
         id: image-secret-scan
         if: inputs.docker_scan
         continue-on-error: true
-        uses: aquasecurity/trivy-action@0.34.1
+        uses: aquasecurity/trivy-action@v0.35.0
         with:
           image-ref: 'local-scan:${{ github.sha }}'
           scanners: 'secret'
@@ -424,7 +424,7 @@ jobs:
       - name: Run Trivy filesystem scan (SARIF)
         id: sarif-scan
         if: inputs.docker_scan && matrix.platform == 'linux/amd64' && github.event.repository.visibility == 'public'
-        uses: aquasecurity/trivy-action@0.34.1
+        uses: aquasecurity/trivy-action@v0.35.0
         with:
           scan-type: 'fs'
           scan-ref: '.'
