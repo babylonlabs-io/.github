@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+## 0.18.1
+- Bump trivy-action to v0.35.0
+
 ## 0.18.0
 - reusable_docker_pipeline: push the scanned image to registry instead of rebuilding a new one
 - reusable_docker_pipeline: use image tag instead of digest when pushing images
