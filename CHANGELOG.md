@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.18.1
+- reusable_docker_pipeline: bump trivy-action to v0.35.0
+- reusable_docker_pipeline: fix `buildArtifactPrefix` not applied to intermediate registry tags
+
 ## 0.18.0
 - reusable_docker_pipeline: push the scanned image to registry instead of rebuilding a new one
 - reusable_docker_pipeline: use image tag instead of digest when pushing images
