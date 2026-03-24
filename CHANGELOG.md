@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+## 0.18.2
+- security: add explicit `permissions: {}` top-level blocks and least-privilege job-level permissions to `reusable_changelog_reminder`, `reusable_go_lint_test`, `reusable_github_release`, and `reusable_sync_branch`
+
 ## 0.18.1
 - reusable_docker_pipeline: bump trivy-action to v0.35.0
 - reusable_docker_pipeline: fix `buildArtifactPrefix` not applied to intermediate registry tags
@@ -15,7 +18,7 @@
 - Bump trivy-action version
 
 ## 0.17.0
-- Allow disabling arm64 Docker build 
+- Allow disabling arm64 Docker build
 
 ## 0.16.1
 - Re-add dockerfile_lint as a dependency of docker_build to block image publishing on lint failures
@@ -63,7 +66,7 @@
 ## 0.13.2
 
 - reusable_docker_pipeline: Disable latest tag
-  
+
 ## 0.13.1
 
 - Support semantic release in the node reusable pipeline
@@ -76,7 +79,7 @@
 
 - reusable_docker_pipeline: Add buildArtifactPrefix to prevent uploading to the same artifact
 - reusable_docker_pipeline: Ignore other tag patterns when inputs.imageTag is available
-  
+
 ## 0.12.0
 
 - reusable_docker_pipeline: Support custom image tag

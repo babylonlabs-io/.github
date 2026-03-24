@@ -17,8 +17,13 @@ on:
           **/*.py
           .github/workflows/*.yml
 
+permissions: {}
+
 jobs:
   check_changelog:
+    permissions:
+      contents: read
+      pull-requests: read
     name: Check Changelogs
     runs-on: ubuntu-24.04
     if: ${{ inputs.run-changelog-check }}
