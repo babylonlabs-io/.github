@@ -1,0 +1,198 @@
+name: Check Pinned Actions
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+  workflow_call:
+
+permissions: {}
+
+jobs:
+  check-pinned-actions:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout calling repo
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2 https://github.com/actions/checkout/releases/tag/v6.0.2
+
+      - name: Check all actions are pinned to commit SHAs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          # ══════════════════════════════════════════════════════════════════
+          # REMOTE VERIFICATION SKIP LIST
+          #
+          # Repos listed here will have their remote SHA check skipped.
+          # The SHA is still required to be a valid 40-char hex string —
+          # only the API call to verify it against the remote tag is skipped.
+          #
+          # Format (one entry per line):
+          #   owner/repo | reason
+          #
+          # To add a new entry: get approval from DevOps and document why.
+          # ══════════════════════════════════════════════════════════════════
+          SKIP_REMOTE_CHECK="
+          aquasecurity/trivy-action        | org enforces an IP allowlist on their GitHub API — runners cannot reach the endpoint
+          "
+
+          # ── helpers ───────────────────────────────────────────────────────
+
+          resolve_sha() {
+            gh api "repos/${1}/commits/${2}" --jq '.sha' 2>/dev/null || true
+          }
+
+          # Returns the skip reason for a repo, or empty string if not skipped.
+          skip_reason() {
+            local repo="$1"
+            echo "$SKIP_REMOTE_CHECK" | while IFS='|' read -r entry reason; do
+              entry="${entry// /}"   # trim spaces
+              if [ "$entry" = "$repo" ]; then
+                echo "${reason## }"  # trim leading space from reason
+                return
+              fi
+            done
+          }
+
+          # ── counters ──────────────────────────────────────────────────────
+
+          WORKFLOWS_DIR="${GITHUB_WORKSPACE}/.github/workflows"
+          FAILED=0
+          COUNT_OK=0
+          COUNT_NOT_PINNED=0
+          COUNT_MISMATCH=0
+          COUNT_LOOKUP_FAIL=0
+          COUNT_NO_COMMENT=0
+          COUNT_SKIPPED_REMOTE=0
+
+          # ── scan ──────────────────────────────────────────────────────────
+
+          while IFS= read -r file; do
+            while IFS= read -r line; do
+              trimmed="${line#"${line%%[![:space:]]*}"}"
+
+              # Extract owner/repo/[subpath]@<ref> — handles both `uses:` and `- uses:`
+              action=$(echo "$trimmed" | sed 's/.*uses: //' | awk '{print $1}')
+              ref="${action##*@}"
+
+              # ── Check 1: must be a full 40-char SHA ──────────────────────
+              if ! echo "$ref" | grep -qE '^[0-9a-f]{40}$'; then
+                echo "NOT PINNED  [$file]"
+                echo "  $trimmed"
+                FAILED=1
+                COUNT_NOT_PINNED=$((COUNT_NOT_PINNED + 1))
+                continue
+              fi
+
+              # ── Check 2: version tag must be present in comment ───────────
+              version=$(echo "$trimmed" | grep -oE '#\s+\S+' | head -1 | awk '{print $2}')
+              if [ -z "$version" ]; then
+                echo "NO VERSION TAG IN COMMENT  [$file]"
+                echo "  $trimmed"
+                FAILED=1
+                COUNT_NO_COMMENT=$((COUNT_NO_COMMENT + 1))
+                continue
+              fi
+
+              # ── Check 3: reject mutable branch refs ──────────────────────
+              if [ "$version" = "master" ] || [ "$version" = "main" ]; then
+                echo "BRANCH REF  [$file]"
+                echo "  ${trimmed}"
+                echo "  '${version}' is a mutable branch — use a version tag instead"
+                FAILED=1
+                COUNT_MISMATCH=$((COUNT_MISMATCH + 1))
+                continue
+              fi
+
+              # owner/repo — strip subpath (e.g. github/codeql-action/upload-sarif -> github/codeql-action)
+              repo=$(echo "$action" | cut -d'@' -f1 | cut -d'/' -f1,2)
+
+              # ── Check 4: skip-list check ──────────────────────────────────
+              reason=$(skip_reason "$repo")
+              if [ -n "$reason" ]; then
+                echo "SKIP REMOTE  ${repo} ${version} ${ref}"
+                echo "  Reason: ${reason}"
+                COUNT_SKIPPED_REMOTE=$((COUNT_SKIPPED_REMOTE + 1))
+                continue
+              fi
+
+              # ── Check 5: resolve remote SHA ───────────────────────────────
+              remote_sha=$(resolve_sha "$repo" "$version")
+
+              if ! echo "$remote_sha" | grep -qE '^[0-9a-f]{40}$'; then
+                echo "LOOKUP FAILED  [$file]  ${repo}@${version}"
+                echo "  Unexpected API response: $remote_sha"
+                echo "  If this org blocks API access, add it to the SKIP_REMOTE_CHECK list above with a reason."
+                FAILED=1
+                COUNT_LOOKUP_FAIL=$((COUNT_LOOKUP_FAIL + 1))
+                continue
+              fi
+
+              # ── Check 6: pinned SHA must match remote ─────────────────────
+              if [ "$ref" != "$remote_sha" ]; then
+                tag_url="https://github.com/${repo}/releases/tag/${version}"
+                echo ""
+                echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+                echo "!!                  HIGH RISK: SHA MISMATCH                 !!"
+                echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+                echo "!!"
+                echo "!!  The pinned SHA in this repo does NOT match the SHA that"
+                echo "!!  ${version} currently resolves to on GitHub."
+                echo "!!"
+                echo "!!  This could mean:"
+                echo "!!    1. A typo when the SHA was copied (misconfiguration)"
+                echo "!!    2. The tag was force-pushed to a different commit"
+                echo "!!    3. The upstream provider was compromised (supply chain attack)"
+                echo "!!"
+                echo "!!  PLEASE ESCALATE TO DEVOPS IMMEDIATELY if you did not"
+                echo "!!  intentionally change this action's pinned SHA."
+                echo "!!"
+                echo "!!  action : ${repo}@${version}"
+                echo "!!  pinned : $ref"
+                echo "!!  remote : $remote_sha"
+                echo "!!  verify : $tag_url"
+                echo "!!"
+                echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+                echo ""
+                FAILED=1
+                COUNT_MISMATCH=$((COUNT_MISMATCH + 1))
+              else
+                echo "OK  ${repo} ${version} ${ref}"
+                COUNT_OK=$((COUNT_OK + 1))
+              fi
+
+            done < <(grep -E '^\s+(-\s+)?uses:\s+[^{]' "$file" | grep '@')
+          done < <(find "$WORKFLOWS_DIR" -name '*.yml' -o -name '*.yaml')
+
+          echo ""
+          echo "─────────────────────────────────────────"
+          echo "  Summary"
+          echo "─────────────────────────────────────────"
+          echo "  OK                   : $COUNT_OK"
+          echo "  Not pinned           : $COUNT_NOT_PINNED"
+          echo "  SHA mismatch         : $COUNT_MISMATCH"
+          echo "  No version tag       : $COUNT_NO_COMMENT"
+          echo "  Lookup failed        : $COUNT_LOOKUP_FAIL"
+          echo "  Skipped (allowlisted): $COUNT_SKIPPED_REMOTE"
+          echo "─────────────────────────────────────────"
+
+          if [ "$FAILED" -ne 0 ]; then
+            echo "  Result: FAILED"
+            echo "─────────────────────────────────────────"
+            if [ "$COUNT_MISMATCH" -gt 0 ]; then
+              echo ""
+              echo "  !! SHA mismatch(es) detected."
+              echo "  !! This is a HIGH RISK security event."
+              echo "  !! Possible causes: misconfiguration, force-pushed tag,"
+              echo "  !! or upstream supply chain compromise."
+              echo "  !! --> ESCALATE TO DEVOPS IMMEDIATELY <--"
+              echo ""
+            fi
+            exit 1
+          fi
+
+          echo "  Result: ALL PASSED"
+          echo "─────────────────────────────────────────"

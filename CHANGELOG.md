@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.19.0
+- security: pin all GitHub Actions to full commit SHAs across all reusable workflows
+- ci: add `reusable_check_pinned_actions` workflow — verifies all `uses:` entries are pinned to commit SHAs and match the remote tag via the GitHub API; supports a skip list for orgs with IP allowlists (e.g. `aquasecurity`)
+- ci: upgrade `actions/checkout` from v4 to v6.0.2 across all workflows to resolve Node.js 20 deprecation warning
+
 ## 0.18.2
 - security: add explicit `permissions: {}` top-level blocks and least-privilege job-level permissions to `reusable_changelog_reminder`, `reusable_go_lint_test`, `reusable_github_release`, and `reusable_sync_branch`
 
