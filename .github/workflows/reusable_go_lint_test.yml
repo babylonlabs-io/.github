@@ -68,8 +68,12 @@ on:
         type: string
         default: testdata.json
 
+permissions: {}
+
 jobs:
   build:
+    permissions:
+      contents: read
     runs-on: ubuntu-24.04
     if: ${{ inputs.run-build }}
     steps:
@@ -108,6 +112,8 @@ jobs:
         run: make build
 
   lint:
+    permissions:
+      contents: read
     runs-on: ubuntu-24.04
     if: ${{ inputs.run-lint }}
     steps:
@@ -135,13 +141,15 @@ jobs:
           args: --timeout=10m
 
   unit-tests:
+    permissions:
+      contents: read
     runs-on: ubuntu-24.04
     if: ${{ inputs.run-unit-tests }}
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-        
+
       # Restore cache if file already cached
       - name: Restore test data cache
         if: ${{ inputs.testdata-url != '' }}
@@ -178,6 +186,8 @@ jobs:
           make test
 
   integration-tests:
+    permissions:
+      contents: read
     runs-on: ubuntu-24.04
     if: ${{ inputs.run-integration-tests }}
     steps:
@@ -209,6 +219,8 @@ jobs:
         run: ${{ inputs.integration-tests-command }}
 
   check-mock-gen:
+    permissions:
+      contents: read
     runs-on: ubuntu-24.04
     if: ${{ inputs.run-check-mock-gen }}
     steps:
@@ -234,6 +246,8 @@ jobs:
             exit 1
           fi
   gosec:
+    permissions:
+      contents: read
     runs-on: ubuntu-24.04
     if: ${{ inputs.run-gosec }}
     steps:

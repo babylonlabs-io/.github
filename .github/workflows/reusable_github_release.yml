@@ -41,8 +41,12 @@ on:
         type: string
         default: ""
 
+permissions: {}
+
 jobs:
   release:
+    permissions:
+      contents: write
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout repository
@@ -52,7 +56,7 @@ jobs:
         run: |
           tee release_notes.md <<EOF
           # 🚀 Overview
-          
+
           ${{ inputs.description }}
           EOF
 
@@ -62,7 +66,7 @@ jobs:
           tee -a release_notes.md <<EOF
 
           # 📄 Changelog
-          
+
           You can view the complete changelog [here](${{ inputs.changelog_path }})
           EOF
 
@@ -88,9 +92,9 @@ jobs:
         run: |
           if [[ -z "${{ inputs.docker_image_table_template }}" ]]; then
             tee -a release_notes.md <<EOF
-          
+
           # 🐳 Docker Image
-          
+
           | Image | Description |
           |---------------|----------------|
           | \`${{ inputs.docker_image_name }}\` | Official release image |
