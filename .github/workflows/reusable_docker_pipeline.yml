@@ -164,7 +164,7 @@ jobs:
         fi
 
     - name: Upload linting results to GitHub Security tab
-      uses: github/codeql-action/upload-sarif@38697555549f1db7851b81482ff19f1fa5c4fedc # v4 https://github.com/github/codeql-action/releases/tag/v4
+      uses: github/codeql-action/upload-sarif@38697555549f1db7851b81482ff19f1fa5c4fedc # v4.34.1 https://github.com/github/codeql-action/releases/tag/v4.34.1
       if: inputs.docker_scan && always() && github.event.repository.visibility == 'public'
       with:
         sarif_file: hadolint-result.sarif
@@ -436,7 +436,7 @@ jobs:
 
       - name: Upload SARIF to GitHub Security tab
         if: inputs.docker_scan && matrix.platform == 'linux/amd64' && github.event.repository.visibility == 'public' && steps.sarif-scan.outcome == 'success'
-        uses: github/codeql-action/upload-sarif@38697555549f1db7851b81482ff19f1fa5c4fedc # v4 https://github.com/github/codeql-action/releases/tag/v4
+        uses: github/codeql-action/upload-sarif@38697555549f1db7851b81482ff19f1fa5c4fedc # v4.34.1 https://github.com/github/codeql-action/releases/tag/v4.34.1
         with:
           sarif_file: 'trivy-fs.sarif'
           category: trivy-fs-${{ env.PLATFORM_PAIR }}
