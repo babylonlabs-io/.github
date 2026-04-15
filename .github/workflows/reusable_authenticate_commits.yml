@@ -214,6 +214,7 @@ jobs:
         if: steps.pr-author.outputs.is_dependabot == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
           HEAD_SHA: ${{ inputs.head_sha || github.event.pull_request.head.sha }}
           BASE_SHA: ${{ inputs.base_sha || github.event.pull_request.base.sha }}
         run: |
@@ -252,11 +253,11 @@ jobs:
             short="${commit:0:12}"
             author=$(git log -1 --format='%an' --end-of-options "$commit")
 
-            # Verify commit signature via GitHub API (non-spoofable)
-            api_response=$(gh api "repos/${{ github.repository }}/git/commits/${commit}" \
-              --jq '{verified: .verification.verified, reason: .verification.reason}')
-            verified=$(echo "$api_response" | jq -r '.verified')
-            reason=$(echo "$api_response" | jq -r '.reason')
+            # Verify commit signature via GitHub Commits API (non-spoofable)
+            verified=$(gh api "repos/${GITHUB_REPOSITORY}/commits/${commit}" \
+              --jq '.commit.verification.verified')
+            reason=$(gh api "repos/${GITHUB_REPOSITORY}/commits/${commit}" \
+              --jq '.commit.verification.reason')
 
             if [ "$verified" = "true" ] && [ "$reason" = "valid" ]; then
               sig_icon="✅"
@@ -321,6 +322,7 @@ jobs:
         if: always() && github.event.pull_request.number
         env:
           GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           set -euo pipefail
@@ -334,7 +336,7 @@ jobs:
 
           # Find existing comment by marker
           existing_comment_id=$(gh api \
-            "repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" \
+            "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments" \
             --jq ".[] | select(.body | contains(\"${COMMENT_MARKER}\")) | .id" \
             | head -n 1 || { echo "::warning::Failed to query existing PR comments; will create new comment." >&2; true; })
 
@@ -342,7 +344,7 @@ jobs:
             echo "Updating existing comment (ID: ${existing_comment_id})..."
             gh api \
               --method PATCH \
-              "repos/${{ github.repository }}/issues/comments/${existing_comment_id}" \
+              "repos/${GITHUB_REPOSITORY}/issues/comments/${existing_comment_id}" \
               -f body="$(cat /tmp/pr-comment-body.md)"
           else
             echo "Creating new comment..."
