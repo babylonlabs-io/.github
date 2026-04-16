@@ -35,44 +35,43 @@ jobs:
 
       - name: Check for commits in base branch but not in target branch
         id: check_commits
+        env:
+          BASE_BRANCH: ${{ inputs.base_branch }}
+          TARGET_BRANCH: ${{ inputs.target_branch }}
         run: |
-          base_branch=${{ inputs.base_branch }}
-          target_branch=${{ inputs.target_branch }}
+          echo "Checking for commits in $BASE_BRANCH that are not in $TARGET_BRANCH..."
 
-          echo "Checking for commits in $base_branch that are not in $target_branch..."
-
-          new_commits=$(git log origin/$base_branch --not origin/$target_branch --oneline)
+          new_commits=$(git log "origin/$BASE_BRANCH" --not "origin/$TARGET_BRANCH" --oneline)
 
           if [ -z "$new_commits" ]; then
-            echo "No unique commits found in $base_branch that are not in $target_branch."
+            echo "No unique commits found in $BASE_BRANCH that are not in $TARGET_BRANCH."
             echo "no_diff=true" >> $GITHUB_ENV
           else
-            echo "Unique commits in $base_branch that are not in $target_branch:"
+            echo "Unique commits in $BASE_BRANCH that are not in $TARGET_BRANCH:"
             echo "$new_commits"
             echo "no_diff=false" >> $GITHUB_ENV
           fi
 
       - name: Check for existing PR and create if not exists
         if: env.no_diff == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BASE_BRANCH: ${{ inputs.base_branch }}
+          TARGET_BRANCH: ${{ inputs.target_branch }}
+          REVIEWERS: ${{ inputs.reviewers }}
+          REPO: ${{ github.repository }}
         run: |
-          base_branch="${{ inputs.base_branch }}"
-          target_branch="${{ inputs.target_branch }}"
-          reviewers="${{ inputs.reviewers }}"
-          repo="${{ github.repository }}"
-
-          pr_exists=$(gh pr list --base "$target_branch" --head "$base_branch" --repo "$repo" --json number --jq '.[0].number')
+          pr_exists=$(gh pr list --base "$TARGET_BRANCH" --head "$BASE_BRANCH" --repo "$REPO" --json number --jq '.[0].number')
 
           if [ -n "$pr_exists" ]; then
             echo "A pull request already exists: #$pr_exists"
           else
-            gh pr create --base "$target_branch" \
-            --head "$base_branch" \
-            --title "Sync from $base_branch to $target_branch" \
-            --body "This PR synchronizes changes from $base_branch to $target_branch." \
-            --repo "$repo" \
-            --reviewer "$reviewers"
+            gh pr create --base "$TARGET_BRANCH" \
+            --head "$BASE_BRANCH" \
+            --title "Sync from $BASE_BRANCH to $TARGET_BRANCH" \
+            --body "This PR synchronizes changes from $BASE_BRANCH to $TARGET_BRANCH." \
+            --repo "$REPO" \
+            --reviewer "$REVIEWERS"
 
             echo "Pull request created successfully."
           fi
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

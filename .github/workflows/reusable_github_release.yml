@@ -52,26 +52,35 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2 https://github.com/actions/checkout/releases/tag/v6.0.2
       - name: Generate base release notes
+        env:
+          DESCRIPTION: ${{ inputs.description }}
         run: |
           tee release_notes.md <<EOF
           # 🚀 Overview
 
-          ${{ inputs.description }}
+          $DESCRIPTION
           EOF
 
       - name: Append changelog section (if enabled)
         if: inputs.changelog_path
+        env:
+          CHANGELOG_PATH: ${{ inputs.changelog_path }}
         run: |
           tee -a release_notes.md <<EOF
 
           # 📄 Changelog
 
-          You can view the complete changelog [here](${{ inputs.changelog_path }})
+          You can view the complete changelog [here]($CHANGELOG_PATH)
           EOF
 
       - name: Append Build from Source section (if enabled)
         if: inputs.build_command
+        env:
+          REPO: ${{ github.repository }}
+          TAG: ${{ inputs.tag }}
+          BUILD_COMMAND: ${{ inputs.build_command }}
         run: |
+          REPO_NAME=$(basename "$REPO")
           tee -a release_notes.md <<EOF
 
           # 🏗️ Binaries
@@ -79,40 +88,45 @@ jobs:
           If you prefer to build from source, use the following commands:
 
           \`\`\`sh
-          git clone https://github.com/${{ github.repository }}.git
-          cd $(basename ${{ github.repository }})
-          git checkout ${{ inputs.tag }}
-          ${{ inputs.build_command }}
+          git clone https://github.com/${REPO}.git
+          cd ${REPO_NAME}
+          git checkout ${TAG}
+          ${BUILD_COMMAND}
           \`\`\`
           EOF
 
       - name: Append Docker Image section (if enabled)
         if: inputs.docker_image_name || inputs.docker_image_table_template
+        env:
+          DOCKER_IMAGE_NAME: ${{ inputs.docker_image_name }}
+          DOCKER_IMAGE_TABLE: ${{ inputs.docker_image_table_template }}
         run: |
-          if [[ -z "${{ inputs.docker_image_table_template }}" ]]; then
+          if [[ -z "$DOCKER_IMAGE_TABLE" ]]; then
             tee -a release_notes.md <<EOF
 
           # 🐳 Docker Image
 
           | Image | Description |
           |---------------|----------------|
-          | \`${{ inputs.docker_image_name }}\` | Official release image |
+          | \`${DOCKER_IMAGE_NAME}\` | Official release image |
           EOF
           else
             tee -a release_notes.md <<EOF
           # 🐳 Docker Image
-          ${{ inputs.docker_image_table_template }}
+          ${DOCKER_IMAGE_TABLE}
           EOF
           fi
 
       - name: Append Dependencies (if enabled)
         if: inputs.dependencies_template
+        env:
+          DEPENDENCIES: ${{ inputs.dependencies_template }}
         run: |
           tee -a release_notes.md <<EOF
 
           # 📦 Dependencies
 
-          ${{ inputs.dependencies_template }}
+          $DEPENDENCIES
           EOF
 
       - name: Create GitHub release
