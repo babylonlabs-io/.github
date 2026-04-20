@@ -86,8 +86,10 @@ jobs:
 
       - name: Configure Private Module Access
         if: ${{ inputs.go-private-repos-authentication }}
+        env:
+          GO_PRIVATE_TOKEN: ${{ secrets.GO_PRIVATE_TOKEN }}
         run: |
-          git config --global url."https://${{ secrets.GO_PRIVATE_TOKEN }}@github.com/".insteadOf "https://github.com/"
+          git config --global url."https://${GO_PRIVATE_TOKEN}@github.com/".insteadOf "https://github.com/"
 
       - name: Print Go environment
         run: go env
@@ -105,7 +107,9 @@ jobs:
 
       - name: Install Dependencies
         if: ${{ inputs.install-dependencies-command != '' }}
-        run: ${{ inputs.install-dependencies-command }}
+        env:
+          INSTALL_CMD: ${{ inputs.install-dependencies-command }}
+        run: eval "$INSTALL_CMD"
 
       - name: Build Application
         run: make build
@@ -125,12 +129,16 @@ jobs:
 
       - name: Configure Private Module Access
         if: ${{ inputs.go-private-repos-authentication }}
+        env:
+          GO_PRIVATE_TOKEN: ${{ secrets.GO_PRIVATE_TOKEN }}
         run: |
-          git config --global url."https://${{ secrets.GO_PRIVATE_TOKEN }}@github.com/".insteadOf "https://github.com/"
+          git config --global url."https://${GO_PRIVATE_TOKEN}@github.com/".insteadOf "https://github.com/"
 
       - name: Install Dependencies
         if: ${{ inputs.install-dependencies-command != '' }}
-        run: ${{ inputs.install-dependencies-command }}
+        env:
+          INSTALL_CMD: ${{ inputs.install-dependencies-command }}
+        run: eval "$INSTALL_CMD"
 
       - name: Run Lint
         uses: golangci/golangci-lint-action@4afd733a84b1f43292c63897423277bb7f4313a9 # v8 https://github.com/golangci/golangci-lint-action/releases/tag/v8
@@ -159,10 +167,13 @@ jobs:
       # Download file if cache miss
       - name: Download test data (if cache miss)
         if: ${{ inputs.testdata-url != '' && steps.cache-testdata.outputs.cache-hit != 'true' }}
+        env:
+          TESTDATA_URL: ${{ inputs.testdata-url }}
+          TESTDATA_PATH: ${{ inputs.testdata-path }}
         run: |
-          echo "Cache miss — downloading test data from ${{ inputs.testdata-url }} to ${{ inputs.testdata-path }}..."
-          mkdir -p "$(dirname "${{ inputs.testdata-path }}")"
-          curl -L -o "${{ inputs.testdata-path }}" "${{ inputs.testdata-url }}"
+          echo "Cache miss — downloading test data from $TESTDATA_URL to $TESTDATA_PATH..."
+          mkdir -p "$(dirname "$TESTDATA_PATH")"
+          curl -L -o "$TESTDATA_PATH" "$TESTDATA_URL"
 
       - name: Set up Go
         uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5 https://github.com/actions/setup-go/releases/tag/v5
@@ -171,12 +182,16 @@ jobs:
 
       - name: Configure Private Module Access
         if: ${{ inputs.go-private-repos-authentication }}
+        env:
+          GO_PRIVATE_TOKEN: ${{ secrets.GO_PRIVATE_TOKEN }}
         run: |
-          git config --global url."https://${{ secrets.GO_PRIVATE_TOKEN }}@github.com/".insteadOf "https://github.com/"
+          git config --global url."https://${GO_PRIVATE_TOKEN}@github.com/".insteadOf "https://github.com/"
 
       - name: Install Dependencies
         if: ${{ inputs.install-dependencies-command != '' }}
-        run: ${{ inputs.install-dependencies-command }}
+        env:
+          INSTALL_CMD: ${{ inputs.install-dependencies-command }}
+        run: eval "$INSTALL_CMD"
 
       - name: Run Unit Tests
         run: |
@@ -204,15 +219,21 @@ jobs:
 
       - name: Configure Private Module Access
         if: ${{ inputs.go-private-repos-authentication }}
+        env:
+          GO_PRIVATE_TOKEN: ${{ secrets.GO_PRIVATE_TOKEN }}
         run: |
-          git config --global url."https://${{ secrets.GO_PRIVATE_TOKEN }}@github.com/".insteadOf "https://github.com/"
+          git config --global url."https://${GO_PRIVATE_TOKEN}@github.com/".insteadOf "https://github.com/"
 
       - name: Install Dependencies
         if: ${{ inputs.install-dependencies-command != '' }}
-        run: ${{ inputs.install-dependencies-command }}
+        env:
+          INSTALL_CMD: ${{ inputs.install-dependencies-command }}
+        run: eval "$INSTALL_CMD"
 
       - name: Run Integration Tests
-        run: ${{ inputs.integration-tests-command }}
+        env:
+          TEST_CMD: ${{ inputs.integration-tests-command }}
+        run: eval "$TEST_CMD"
 
   check-mock-gen:
     permissions:
@@ -229,7 +250,9 @@ jobs:
 
       - name: Install Dependencies
         if: ${{ inputs.install-dependencies-command != '' }}
-        run: ${{ inputs.install-dependencies-command }}
+        env:
+          INSTALL_CMD: ${{ inputs.install-dependencies-command }}
+        run: eval "$INSTALL_CMD"
 
       - name: Run make mock-gen
         run: make mock-gen

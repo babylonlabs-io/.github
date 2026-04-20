@@ -118,20 +118,26 @@ jobs:
     steps:
       - name: Determine image name
         id: set_image_name
+        env:
+          REPO_NAME: ${{ inputs.repoName }}
         run: |
-          if [ -n "${{ inputs.repoName }}" ]; then
-            echo "IMAGE_NAME=${{ inputs.repoName }}" >> $GITHUB_OUTPUT
+          if [ -n "$REPO_NAME" ]; then
+            echo "IMAGE_NAME=$REPO_NAME" >> $GITHUB_OUTPUT
           else
-            echo "IMAGE_NAME=$(echo $GITHUB_REPOSITORY | cut -d '/' -f 2)" >> $GITHUB_OUTPUT
+            echo "IMAGE_NAME=$(echo "$GITHUB_REPOSITORY" | cut -d '/' -f 2)" >> $GITHUB_OUTPUT
           fi
 
       - name: Set build matrix
         id: set_matrix
+        env:
+          DISABLE_ARM64: ${{ inputs.disable_arm64 }}
+          RUNS_ON_AMD64: ${{ inputs.runs_on_amd64 }}
+          RUNS_ON_ARM64: ${{ inputs.runs_on_arm64 }}
         run: |
-          if [ "${{ inputs.disable_arm64 }}" == "true" ]; then
-            echo 'MATRIX={"include":[{"platform":"linux/amd64","runner":"${{ inputs.runs_on_amd64 }}"}]}' >> $GITHUB_OUTPUT
+          if [ "$DISABLE_ARM64" == "true" ]; then
+            echo "MATRIX={\"include\":[{\"platform\":\"linux/amd64\",\"runner\":\"${RUNS_ON_AMD64}\"}]}" >> $GITHUB_OUTPUT
           else
-            echo 'MATRIX={"include":[{"platform":"linux/amd64","runner":"${{ inputs.runs_on_amd64 }}"},{"platform":"linux/arm64","runner":"${{ inputs.runs_on_arm64 }}"}]}' >> $GITHUB_OUTPUT
+            echo "MATRIX={\"include\":[{\"platform\":\"linux/amd64\",\"runner\":\"${RUNS_ON_AMD64}\"},{\"platform\":\"linux/arm64\",\"runner\":\"${RUNS_ON_ARM64}\"}]}" >> $GITHUB_OUTPUT
           fi
 
   dockerfile_lint:
@@ -181,9 +187,10 @@ jobs:
       matrix: ${{ fromJSON(needs.prepare-metadata.outputs.matrix) }}
     steps:
       - name: Prepare
+        env:
+          PLATFORM: ${{ matrix.platform }}
         run: |
-          platform=${{ matrix.platform }}
-          echo "PLATFORM_PAIR=${platform//\//-}" >> $GITHUB_ENV
+          echo "PLATFORM_PAIR=${PLATFORM//\//-}" >> $GITHUB_ENV
 
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2 https://github.com/actions/checkout/releases/tag/v6.0.2
@@ -234,13 +241,18 @@ jobs:
       # Secrets are only added when necessary
       - name: Generate and mask build secrets
         id: set-build-secrets
+        env:
+          GO_PRIVATE_AUTH: ${{ inputs.go-private-repos-authentication }}
+          PRIVATE_AUTH: ${{ inputs.private-repos-authentication }}
+          GO_PRIVATE_TOKEN: ${{ secrets.GO_PRIVATE_TOKEN }}
+          PRIVATE_REPO_TOKEN_VALUE: ${{ secrets.PRIVATE_REPO_TOKEN }}
         run: |
           SECRETS=""
-          if [ "${{ inputs.go-private-repos-authentication }}" == "true" ]; then
-            SECRETS+="GO_PRIVATE_TOKEN=${{ secrets.GO_PRIVATE_TOKEN }}\n"
+          if [ "$GO_PRIVATE_AUTH" == "true" ]; then
+            SECRETS+="GO_PRIVATE_TOKEN=${GO_PRIVATE_TOKEN}\n"
           fi
-          if [ "${{ inputs.private-repos-authentication }}" == "true" ]; then
-            SECRETS+="PRIVATE_REPO_TOKEN=${{ secrets.PRIVATE_REPO_TOKEN }}\n"
+          if [ "$PRIVATE_AUTH" == "true" ]; then
+            SECRETS+="PRIVATE_REPO_TOKEN=${PRIVATE_REPO_TOKEN_VALUE}\n"
           fi
           echo "::add-mask::$SECRETS"
           echo "SECRETS<<EOF" >> $GITHUB_OUTPUT
@@ -306,9 +318,10 @@ jobs:
           IMAGE_SCAN_OUTCOME: ${{ steps.image-scan.outcome }}
           FS_SECRET_OUTCOME: ${{ steps.fs-secret-scan.outcome }}
           IMAGE_SECRET_OUTCOME: ${{ steps.image-secret-scan.outcome }}
+          PLATFORM: ${{ matrix.platform }}
         run: |
           echo "## 🐳 Container Image Vulnerabilities" >> $GITHUB_STEP_SUMMARY
-          echo "Platform: \`${{ matrix.platform }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "Platform: \`$PLATFORM\`" >> $GITHUB_STEP_SUMMARY
           case "$IMAGE_SCAN_OUTCOME" in
             failure)
               if [ -f trivy-image.txt ]; then
@@ -329,7 +342,7 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           # FS scan only runs on amd64 (source deps are platform-independent)
           echo "## 📦 Source Dependency Vulnerabilities" >> $GITHUB_STEP_SUMMARY
-          if [ "${{ matrix.platform }}" != "linux/amd64" ]; then
+          if [ "$PLATFORM" != "linux/amd64" ]; then
             echo "ℹ️ Filesystem scan only runs on linux/amd64" >> $GITHUB_STEP_SUMMARY
           else
             case "$FS_SCAN_OUTCOME" in
@@ -352,7 +365,7 @@ jobs:
           fi
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "## 🔑 Image Secret Scan" >> $GITHUB_STEP_SUMMARY
-          echo "Platform: \`${{ matrix.platform }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "Platform: \`$PLATFORM\`" >> $GITHUB_STEP_SUMMARY
           case "$IMAGE_SECRET_OUTCOME" in
             failure)
               if [ -f trivy-image-secrets.txt ]; then
@@ -372,7 +385,7 @@ jobs:
           esac
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "## 🔑 Filesystem Secret Scan" >> $GITHUB_STEP_SUMMARY
-          if [ "${{ matrix.platform }}" != "linux/amd64" ]; then
+          if [ "$PLATFORM" != "linux/amd64" ]; then
             echo "ℹ️ Filesystem secret scan only runs on linux/amd64" >> $GITHUB_STEP_SUMMARY
           else
             case "$FS_SECRET_OUTCOME" in
@@ -462,22 +475,37 @@ jobs:
 
       - name: Login to Amazon ECR
         if: inputs.publish && inputs.push_to_ecr
+        env:
+          AWS_ECR_REGION: ${{ vars.AWS_ECR_REGION }}
+          AWS_ECR_REGISTRY_ID: ${{ vars.AWS_ECR_REGISTRY_ID }}
         run: |
-          aws ecr get-login-password --region ${{ vars.AWS_ECR_REGION }} | docker login --username AWS --password-stdin ${{ vars.AWS_ECR_REGISTRY_ID }}
+          aws ecr get-login-password --region "$AWS_ECR_REGION" | docker login --username AWS --password-stdin "$AWS_ECR_REGISTRY_ID"
 
       - name: Push to Docker Hub
         if: inputs.publish && inputs.push_to_dockerhub
+        env:
+          DOCKERHUB_REGISTRY: ${{ vars.DOCKERHUB_REGISTRY_ID || 'babylonlabs' }}
+          IMAGE_NAME: ${{ needs.prepare-metadata.outputs.image-name }}
+          BUILD_PREFIX: ${{ inputs.buildArtifactPrefix }}
+          IMAGE_TAG: ${{ inputs.imageTag || github.sha }}
+          GIT_SHA: ${{ github.sha }}
         run: |
-          REPO="${{ vars.DOCKERHUB_REGISTRY_ID || 'babylonlabs' }}/${{ needs.prepare-metadata.outputs.image-name }}"
-          docker tag "local-scan:${{ inputs.buildArtifactPrefix }}${{ github.sha }}" "$REPO:${{ inputs.imageTag || github.sha }}-${{ env.PLATFORM_PAIR }}"
-          docker push "$REPO:${{ inputs.imageTag || github.sha }}-${{ env.PLATFORM_PAIR }}"
+          REPO="${DOCKERHUB_REGISTRY}/${IMAGE_NAME}"
+          docker tag "local-scan:${BUILD_PREFIX}${GIT_SHA}" "$REPO:${IMAGE_TAG}-${PLATFORM_PAIR}"
+          docker push "$REPO:${IMAGE_TAG}-${PLATFORM_PAIR}"
 
       - name: Push to ECR
         if: inputs.publish && inputs.push_to_ecr
+        env:
+          AWS_ECR_REGISTRY_ID: ${{ vars.AWS_ECR_REGISTRY_ID }}
+          IMAGE_NAME: ${{ needs.prepare-metadata.outputs.image-name }}
+          BUILD_PREFIX: ${{ inputs.buildArtifactPrefix }}
+          IMAGE_TAG: ${{ inputs.imageTag || github.sha }}
+          GIT_SHA: ${{ github.sha }}
         run: |
-          REPO="${{ vars.AWS_ECR_REGISTRY_ID }}/${{ needs.prepare-metadata.outputs.image-name }}"
-          docker tag "local-scan:${{ inputs.buildArtifactPrefix }}${{ github.sha }}" "$REPO:${{ inputs.imageTag || github.sha }}-${{ env.PLATFORM_PAIR }}"
-          docker push "$REPO:${{ inputs.imageTag || github.sha }}-${{ env.PLATFORM_PAIR }}"
+          REPO="${AWS_ECR_REGISTRY_ID}/${IMAGE_NAME}"
+          docker tag "local-scan:${BUILD_PREFIX}${GIT_SHA}" "$REPO:${IMAGE_TAG}-${PLATFORM_PAIR}"
+          docker push "$REPO:${IMAGE_TAG}-${PLATFORM_PAIR}"
 
   merge_dockerhub:
     runs-on: ${{ inputs.runs_on_amd64 }}
@@ -511,19 +539,27 @@ jobs:
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Create manifest list and push
+        env:
+          DOCKERHUB_REGISTRY: ${{ vars.DOCKERHUB_REGISTRY_ID || 'babylonlabs' }}
+          IMAGE_NAME: ${{ needs.prepare-metadata.outputs.image-name }}
+          BUILD_MATRIX: ${{ needs.prepare-metadata.outputs.matrix }}
+          IMAGE_TAG: ${{ inputs.imageTag || github.sha }}
         run: |
           first_tag=$(jq -r '.tags[0] // empty' <<< "$DOCKER_METADATA_OUTPUT_JSON")
           if [ -z "$first_tag" ]; then
             echo "No tag found in DOCKER_METADATA_OUTPUT_JSON"; exit 1
           fi
-          REPO="${{ vars.DOCKERHUB_REGISTRY_ID || 'babylonlabs' }}/${{ needs.prepare-metadata.outputs.image-name }}"
-          # e.g. babylonlabs/babylond:abc123sha-linux-amd64 babylonlabs/babylond:abc123sha-linux-arm64
-          source_tags=$(echo '${{ needs.prepare-metadata.outputs.matrix }}' | jq -r '.include[].platform | gsub("/"; "-")' | xargs -I{} echo "$REPO:${{ inputs.imageTag || github.sha }}-{}" | tr '\n' ' ')
+          REPO="${DOCKERHUB_REGISTRY}/${IMAGE_NAME}"
+          source_tags=$(echo "$BUILD_MATRIX" | jq -r '.include[].platform | gsub("/"; "-")' | xargs -I{} echo "$REPO:${IMAGE_TAG}-{}" | tr '\n' ' ')
           docker buildx imagetools create -t "$first_tag" $source_tags
 
       - name: Inspect image
+        env:
+          DOCKERHUB_REGISTRY: ${{ vars.DOCKERHUB_REGISTRY_ID || 'babylonlabs' }}
+          IMAGE_NAME: ${{ needs.prepare-metadata.outputs.image-name }}
+          IMAGE_VERSION: ${{ steps.meta.outputs.version }}
         run: |
-          docker buildx imagetools inspect ${{ vars.DOCKERHUB_REGISTRY_ID || 'babylonlabs' }}/${{ needs.prepare-metadata.outputs.image-name }}:${{ steps.meta.outputs.version }}
+          docker buildx imagetools inspect "${DOCKERHUB_REGISTRY}/${IMAGE_NAME}:${IMAGE_VERSION}"
 
   merge_ecr:
     runs-on: ${{ inputs.runs_on_amd64 }}
@@ -558,20 +594,31 @@ jobs:
           aws-region: ${{ vars.AWS_ECR_REGION }}
 
       - name: Login to Amazon ECR
+        env:
+          AWS_ECR_REGION: ${{ vars.AWS_ECR_REGION }}
+          AWS_ECR_REGISTRY_ID: ${{ vars.AWS_ECR_REGISTRY_ID }}
         run: |
-          aws ecr get-login-password --region ${{ vars.AWS_ECR_REGION }} | docker login --username AWS --password-stdin ${{ vars.AWS_ECR_REGISTRY_ID }}
+          aws ecr get-login-password --region "$AWS_ECR_REGION" | docker login --username AWS --password-stdin "$AWS_ECR_REGISTRY_ID"
 
       - name: Create manifest list and push
+        env:
+          AWS_ECR_REGISTRY_ID: ${{ vars.AWS_ECR_REGISTRY_ID }}
+          IMAGE_NAME: ${{ needs.prepare-metadata.outputs.image-name }}
+          BUILD_MATRIX: ${{ needs.prepare-metadata.outputs.matrix }}
+          IMAGE_TAG: ${{ inputs.imageTag || github.sha }}
         run: |
           first_tag=$(jq -r '.tags[0] // empty' <<< "$DOCKER_METADATA_OUTPUT_JSON")
           if [ -z "$first_tag" ]; then
             echo "No tag found in DOCKER_METADATA_OUTPUT_JSON"; exit 1
           fi
-          REPO="${{ vars.AWS_ECR_REGISTRY_ID }}/${{ needs.prepare-metadata.outputs.image-name }}"
-          # e.g. 123456789.dkr.ecr.us-east-1.amazonaws.com/babylond:abc123sha-linux-amd64 123456789.dkr.ecr.us-east-1.amazonaws.com/babylond:abc123sha-linux-arm64
-          source_tags=$(echo '${{ needs.prepare-metadata.outputs.matrix }}' | jq -r '.include[].platform | gsub("/"; "-")' | xargs -I{} echo "$REPO:${{ inputs.imageTag || github.sha }}-{}" | tr '\n' ' ')
+          REPO="${AWS_ECR_REGISTRY_ID}/${IMAGE_NAME}"
+          source_tags=$(echo "$BUILD_MATRIX" | jq -r '.include[].platform | gsub("/"; "-")' | xargs -I{} echo "$REPO:${IMAGE_TAG}-{}" | tr '\n' ' ')
           docker buildx imagetools create -t "$first_tag" $source_tags
 
       - name: Inspect image
+        env:
+          AWS_ECR_REGISTRY_ID: ${{ vars.AWS_ECR_REGISTRY_ID }}
+          IMAGE_NAME: ${{ needs.prepare-metadata.outputs.image-name }}
+          IMAGE_VERSION: ${{ steps.meta.outputs.version }}
         run: |
-          docker buildx imagetools inspect ${{ vars.AWS_ECR_REGISTRY_ID }}/${{ needs.prepare-metadata.outputs.image-name }}:${{ steps.meta.outputs.version }}
+          docker buildx imagetools inspect "${AWS_ECR_REGISTRY_ID}/${IMAGE_NAME}:${IMAGE_VERSION}"

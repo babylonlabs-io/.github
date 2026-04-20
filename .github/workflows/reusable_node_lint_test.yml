@@ -55,16 +55,20 @@ jobs:
 
     steps:
     - name: Validate Inputs
+      env:
+        INPUT_PUBLISH: ${{ inputs.publish }}
+        INPUT_CHANGESETS: ${{ inputs.run-changesets }}
+        INPUT_SEMANTIC: ${{ inputs.use-semantic-release }}
       run: |
-        if [ "${{ inputs.publish }}" = "true" ] && [ "${{ inputs.run-changesets }}" = "true" ]; then
+        if [ "$INPUT_PUBLISH" = "true" ] && [ "$INPUT_CHANGESETS" = "true" ]; then
           echo "Error: Both 'publish' and 'run-changesets' cannot be true at the same time."
           exit 1
         fi
-        if [ "${{ inputs.publish }}" = "true" ] && [ "${{ inputs.use-semantic-release }}" = "true" ]; then
+        if [ "$INPUT_PUBLISH" = "true" ] && [ "$INPUT_SEMANTIC" = "true" ]; then
           echo "Error: Cannot use both 'publish' and 'use-semantic-release' at the same time."
           exit 1
         fi
-        if [ "${{ inputs.run-changesets }}" = "true" ] && [ "${{ inputs.use-semantic-release }}" = "true" ]; then
+        if [ "$INPUT_CHANGESETS" = "true" ] && [ "$INPUT_SEMANTIC" = "true" ]; then
           echo "Error: Cannot use both 'run-changesets' and 'use-semantic-release' at the same time."
           exit 1
         fi
@@ -111,4 +115,6 @@ jobs:
 
     - name: Publish package
       if: ${{ inputs.publish }}
-      run: ${{ inputs.publish-command }}
+      env:
+        PUBLISH_CMD: ${{ inputs.publish-command }}
+      run: eval "$PUBLISH_CMD"
