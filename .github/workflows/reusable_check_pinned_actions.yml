@@ -108,6 +108,12 @@ jobs:
               # the developer must consciously type the sentinel — preserving
               # the "no random commits" guarantee while accepting that no
               # remote validation is possible.
+              #
+              # POLICY: using `# unversioned` requires DevOps review, same
+              # bar as adding an entry to SKIP_REMOTE_CHECK. The free-form
+              # text after the sentinel should justify why no release tag
+              # is available (e.g. "upstream-publishes-via-branch-channels").
+              # Reviewers can grep `# unversioned` to find every opt-out.
               if [ "$version" = "unversioned" ]; then
                 echo "SHA-ONLY  ${repo}@${ref}"
                 COUNT_SENTINEL=$((COUNT_SENTINEL + 1))
