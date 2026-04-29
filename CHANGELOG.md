@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+## 0.19.2
+- ci: `reusable_check_pinned_actions` accepts `# unversioned` sentinel comment to allow SHA-only pinning for actions whose maintainers don't publish release tags (e.g. `dtolnay/rust-toolchain`). The SHA must still be a 40-char hex string; remote tag resolution is skipped.
+
 ## 0.19.0
 - security: pin all GitHub Actions to full commit SHAs across all reusable workflows
 - ci: add `reusable_check_pinned_actions` workflow — verifies all `uses:` entries are pinned to commit SHAs and match the remote tag via the GitHub API; supports a skip list for orgs with IP allowlists (e.g. `aquasecurity`)

@@ -67,6 +67,7 @@ jobs:
           COUNT_LOOKUP_FAIL=0
           COUNT_NO_COMMENT=0
           COUNT_SKIPPED_REMOTE=0
+          COUNT_SENTINEL=0
 
           # ── scan ──────────────────────────────────────────────────────────
 
@@ -77,6 +78,8 @@ jobs:
               # Extract owner/repo/[subpath]@<ref> — handles both `uses:` and `- uses:`
               action=$(echo "$trimmed" | sed 's/.*uses: //' | awk '{print $1}')
               ref="${action##*@}"
+              # owner/repo — strip subpath (e.g. github/codeql-action/upload-sarif -> github/codeql-action)
+              repo=$(echo "$action" | cut -d'@' -f1 | cut -d'/' -f1,2)
 
               # ── Check 1: must be a full 40-char SHA ──────────────────────
               if ! echo "$ref" | grep -qE '^[0-9a-f]{40}$'; then
@@ -97,6 +100,26 @@ jobs:
                 continue
               fi
 
+              # ── Check 2.5: SHA-only sentinel ─────────────────────────────
+              # Comment value "unversioned" opts out of remote tag resolution
+              # for actions whose maintainers don't publish stable release
+              # tags (e.g. dtolnay/rust-toolchain ships via branch channels).
+              # The SHA is still locked to a 40-char hex string (Check 1) and
+              # the developer must consciously type the sentinel — preserving
+              # the "no random commits" guarantee while accepting that no
+              # remote validation is possible.
+              #
+              # POLICY: using `# unversioned` requires DevOps review, same
+              # bar as adding an entry to SKIP_REMOTE_CHECK. The free-form
+              # text after the sentinel should justify why no release tag
+              # is available (e.g. "upstream-publishes-via-branch-channels").
+              # Reviewers can grep `# unversioned` to find every opt-out.
+              if [ "$version" = "unversioned" ]; then
+                echo "SHA-ONLY  ${repo}@${ref}"
+                COUNT_SENTINEL=$((COUNT_SENTINEL + 1))
+                continue
+              fi
+
               # ── Check 3: reject mutable branch refs ──────────────────────
               if [ "$version" = "master" ] || [ "$version" = "main" ]; then
                 echo "BRANCH REF  [$file]"
@@ -106,9 +129,6 @@ jobs:
                 COUNT_MISMATCH=$((COUNT_MISMATCH + 1))
                 continue
               fi
-
-              # owner/repo — strip subpath (e.g. github/codeql-action/upload-sarif -> github/codeql-action)
-              repo=$(echo "$action" | cut -d'@' -f1 | cut -d'/' -f1,2)
 
               # ── Check 4: skip-list check ──────────────────────────────────
               reason=$(skip_reason "$repo")
@@ -177,6 +197,7 @@ jobs:
           echo "  No version tag       : $COUNT_NO_COMMENT"
           echo "  Lookup failed        : $COUNT_LOOKUP_FAIL"
           echo "  Skipped (allowlisted): $COUNT_SKIPPED_REMOTE"
+          echo "  SHA-only (sentinel)  : $COUNT_SENTINEL"
           echo "─────────────────────────────────────────"
 
           if [ "$FAILED" -ne 0 ]; then
