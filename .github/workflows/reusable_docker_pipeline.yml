@@ -205,7 +205,7 @@ jobs:
         id: fs-scan
         if: inputs.docker_scan && matrix.platform == 'linux/amd64'
         continue-on-error: true
-        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0 https://github.com/aquasecurity/trivy-action/releases/tag/v0.35.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0 https://github.com/aquasecurity/trivy-action/releases/tag/v0.36.0
         with:
           scan-type: 'fs'
           scan-ref: '.'
@@ -223,7 +223,7 @@ jobs:
         id: fs-secret-scan
         if: inputs.docker_scan && matrix.platform == 'linux/amd64'
         continue-on-error: true
-        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0 https://github.com/aquasecurity/trivy-action/releases/tag/v0.35.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0 https://github.com/aquasecurity/trivy-action/releases/tag/v0.36.0
         with:
           scan-type: 'fs'
           scan-ref: '.'
@@ -236,7 +236,7 @@ jobs:
           version: v0.69.2 # https://github.com/aquasecurity/trivy-action/issues/512
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3 https://github.com/docker/setup-buildx-action/releases/tag/v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0 https://github.com/docker/setup-buildx-action/releases/tag/v3.12.0
       # This block is used to not hard-coded the secrets in Build Docker image
       # Secrets are only added when necessary
       - name: Generate and mask build secrets
@@ -263,7 +263,7 @@ jobs:
       # Build image locally for scanning (not pushed yet)
       - name: Build image for scanning
         id: build-local
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6 https://github.com/docker/build-push-action/releases/tag/v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2 https://github.com/docker/build-push-action/releases/tag/v6.19.2
         with:
           platforms: ${{ matrix.platform }}
           context: ${{ inputs.dockerContext }}
@@ -282,7 +282,7 @@ jobs:
         id: image-scan
         if: inputs.docker_scan
         continue-on-error: true
-        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0 https://github.com/aquasecurity/trivy-action/releases/tag/v0.35.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0 https://github.com/aquasecurity/trivy-action/releases/tag/v0.36.0
         with:
           image-ref: 'local-scan:${{ inputs.buildArtifactPrefix }}${{ github.sha }}'
           format: 'table'
@@ -299,7 +299,7 @@ jobs:
         id: image-secret-scan
         if: inputs.docker_scan
         continue-on-error: true
-        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0 https://github.com/aquasecurity/trivy-action/releases/tag/v0.35.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0 https://github.com/aquasecurity/trivy-action/releases/tag/v0.36.0
         with:
           image-ref: 'local-scan:${{ inputs.buildArtifactPrefix }}${{ github.sha }}'
           scanners: 'secret'
@@ -434,7 +434,7 @@ jobs:
       - name: Run Trivy filesystem scan (SARIF)
         id: sarif-scan
         if: inputs.docker_scan && matrix.platform == 'linux/amd64' && github.event.repository.visibility == 'public'
-        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0 https://github.com/aquasecurity/trivy-action/releases/tag/v0.35.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0 https://github.com/aquasecurity/trivy-action/releases/tag/v0.36.0
         with:
           scan-type: 'fs'
           scan-ref: '.'
@@ -460,14 +460,14 @@ jobs:
 
       - name: Login to Docker Hub
         if: inputs.publish && inputs.push_to_dockerhub
-        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3 https://github.com/docker/login-action/releases/tag/v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0 https://github.com/docker/login-action/releases/tag/v3.7.0
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Configure AWS credentials
         if: inputs.publish && inputs.push_to_ecr
-        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4 https://github.com/aws-actions/configure-aws-credentials/releases/tag/v4
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1 https://github.com/aws-actions/configure-aws-credentials/releases/tag/v4.3.1
         with:
           role-to-assume: arn:aws:iam::${{ vars.AWS_ECR_ACCOUNT }}:role/gha-ecr-push
           role-session-name: gh-docker-build-${{ github.run_id }}
@@ -518,10 +518,10 @@ jobs:
       dockerhub_imgver: ${{ steps.meta.outputs.version }}
     steps:
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3 https://github.com/docker/setup-buildx-action/releases/tag/v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0 https://github.com/docker/setup-buildx-action/releases/tag/v3.12.0
       - name: Docker meta
         id: meta
-        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5 https://github.com/docker/metadata-action/releases/tag/v5
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0 https://github.com/docker/metadata-action/releases/tag/v5.10.0
         with:
           images: ${{ vars.DOCKERHUB_REGISTRY_ID || 'babylonlabs' }}/${{ needs.prepare-metadata.outputs.image-name }}
           # If inputs.imageTag is available, other tags will be ignored
@@ -533,7 +533,7 @@ jobs:
             type=raw,enable=${{ !!inputs.imageTag }},priority=300,value=${{ inputs.imageTag }}
 
       - name: Login to Docker Hub
-        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3 https://github.com/docker/login-action/releases/tag/v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0 https://github.com/docker/login-action/releases/tag/v3.7.0
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
@@ -572,10 +572,10 @@ jobs:
       ecr_imgver: ${{ steps.meta.outputs.version }}
     steps:
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3 https://github.com/docker/setup-buildx-action/releases/tag/v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0 https://github.com/docker/setup-buildx-action/releases/tag/v3.12.0
       - name: Docker meta
         id: meta
-        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5 https://github.com/docker/metadata-action/releases/tag/v5
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0 https://github.com/docker/metadata-action/releases/tag/v5.10.0
         with:
           images: ${{ vars.AWS_ECR_REGISTRY_ID }}/${{ needs.prepare-metadata.outputs.image-name }}
           flavor: |
@@ -587,7 +587,7 @@ jobs:
             type=raw,enable=${{ !!inputs.imageTag }},priority=300,value=${{ inputs.imageTag }}
 
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4 https://github.com/aws-actions/configure-aws-credentials/releases/tag/v4
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1 https://github.com/aws-actions/configure-aws-credentials/releases/tag/v4.3.1
         with:
           role-to-assume: arn:aws:iam::${{ vars.AWS_ECR_ACCOUNT }}:role/gha-ecr-push
           role-session-name: gh-docker-build-${{ github.run_id }}
