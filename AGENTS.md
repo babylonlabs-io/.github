@@ -11,9 +11,11 @@ supply-chain change.** Rules below derive from real fixes here (PRs #56, #67, #7
 1. **Never use `pull_request_target` with `actions/checkout` of the PR head.** That
    gives fork PR code access to org secrets. Default answer to "add
    `pull_request_target`": no.
-2. **Every third-party `uses:` MUST be pinned to a 40-char SHA with a version
-   comment.** Enforced by `reusable_check_pinned_actions.yml`. No `actions/*`
-   exception. Major tags (`@v4`) and branches (`@main`) are rejected.
+2. **Every third-party `uses:` MUST be pinned to a 40-char SHA with either an
+   exact `# vX.Y.Z` version comment or the approved `# unversioned` sentinel**
+   (PR #77, for upstreams that don't publish release tags — see Action pinning
+   below for the bar to add one). Enforced by `reusable_check_pinned_actions.yml`.
+   No `actions/*` exception. Major tags (`@v4`) and branches (`@main`) are rejected.
 3. **Every workflow MUST have a top-level `permissions:` block.** Default to
    `permissions: {}` and grant minimum at job level. Omission inherits the repo's
    default token scope (`read-all`/`write-all`) — unsafe.
@@ -120,9 +122,15 @@ Today's references:
 - `secrets.GITHUB_TOKEN` — scope governed by `permissions:`.
 - `secrets.DOCKERHUB_{USERNAME,TOKEN}` — push in docker pipeline; pull-rate raise
   in `reusable_go_lint_test.yml`.
-- `secrets.GO_PRIVATE_TOKEN`, `secrets.PRIVATE_REPO_TOKEN` — routed through
+- `secrets.GO_PRIVATE_TOKEN`, `secrets.PRIVATE_REPO_TOKEN` — used for private
+  repo access. Two carriers in this repo: (a) Docker builds route them through
   `docker/build-push-action` `secrets:` (BuildKit mount), **never** baked into
-  image layers. Masked with `::add-mask::`.
+  image layers; (b) `reusable_go_lint_test.yml` writes `GO_PRIVATE_TOKEN` into a
+  global git URL rewrite (`git config --global url.\"https://${GO_PRIVATE_TOKEN}@github.com/\".insteadOf`)
+  so `go get` resolves private modules — that's a process-global write to
+  `~/.gitconfig`, not a BuildKit mount, so future hardening (e.g. moving to a
+  short-lived GitHub App token or sidecar) should audit this path. Masked with
+  `::add-mask::`.
 - `vars.AWS_ECR_{ACCOUNT,REGION,REGISTRY_ID}`, `vars.DOCKERHUB_REGISTRY_ID`,
   `vars.BABYLON_ALLOWED_SIGNERS` — non-secret config.
 
@@ -186,7 +194,15 @@ Dependabot is exempted via three independent signals (login, immutable user ID
   gosec, pinned-actions check, commit-sig check).
 - Cross-cutting PR (workflow + action bumps + template) — split.
 - `actions/checkout` without `persist-credentials: false` in a workflow that
-  later runs third-party actions or untrusted code.
+  later runs **third-party actions against the checked-out tree**, or runs
+  scripts/`make`/`npm`/composite actions sourced from the PR head, or runs
+  any step capable of exfiltrating the auto-provisioned `GITHUB_TOKEN` (which
+  the checkout step caches into the local git config by default). Trust
+  boundary: if the next step in the same job is `aquasecurity/trivy-action`,
+  `actions/setup-*` on PR head, an action you didn't author, or `run:` script
+  derived from the PR diff, set `persist-credentials: false`. Workflows that
+  only consume the SHA (e.g. `reusable_authenticate_commits.yml` reading commit
+  metadata) are the documented baseline — match that pattern.
 - Echoing a secret, even truncated. Use `${#SECRET}` only.
 - A new `uses:` SHA without a matching `# vX.Y.Z` comment.
 
@@ -196,18 +212,40 @@ Dependabot is exempted via three independent signals (login, immutable user ID
 # 1. Workflow YAML lint (https://github.com/rhysd/actionlint)
 actionlint .github/workflows/*.yml
 
-# 2. Any unpinned uses:
-grep -rE 'uses:\s+[^/[:space:]]+/[^@[:space:]]+@[^[:space:]]+' .github/workflows/ \
+# 2. Any unpinned uses: (must scan .yml AND .yaml — matches reusable_check_pinned_actions)
+grep -rE 'uses:\s+[^/[:space:]]+/[^@[:space:]]+@[^[:space:]]+' \
+     --include='*.yml' --include='*.yaml' .github/workflows/ \
   | grep -vE '@[0-9a-f]{40}\b'
 
-# 3. Any ${{ ... }} in a run: body (heuristic — verify hits)
-grep -nE 'run:.*\$\{\{' .github/workflows/*.yml
+# 3. Any ${{ ... }} inside a run: body. The single-line grep below misses the
+#    far more common `run: |` multiline form — most shell steps use it, and a
+#    dangerous interpolation on a later script line silently passes. Use both
+#    checks together. The yq form is authoritative; awk is the no-deps fallback.
+#
+#    Authoritative (requires `yq`): list every step where `run` contains `${{`.
+yq eval-all '
+  .. | select(has("steps")) | .steps[]
+  | select(.run != null and (.run | test("\\$\\{\\{")))
+  | {"file": filename, "name": .name, "snippet": .run}
+' .github/workflows/*.yml .github/workflows/*.yaml 2>/dev/null
 
-# 4. Any pull_request_target
-grep -nE 'pull_request_target' .github/workflows/*.yml
+#    Fallback: awk over multiline `run: |` blocks (single-line + folded scalars).
+for f in .github/workflows/*.yml .github/workflows/*.yaml; do
+  [ -e "$f" ] || continue
+  awk '
+    /^[[:space:]]*-?[[:space:]]*run:[[:space:]]*\|/ { in_run=1; indent=match($0,/[^ ]/); next }
+    in_run && /\$\{\{/ { print FILENAME ":" NR ": " $0 }
+    in_run && /^[[:space:]]*[^[:space:]]/ && match($0,/[^ ]/) <= indent { in_run=0 }
+    /^[[:space:]]*-?[[:space:]]*run:.*\$\{\{/ { print FILENAME ":" NR ": " $0 }
+  ' "$f"
+done
 
-# 5. Top-level permissions present
-for f in .github/workflows/*.yml; do
+# 4. Any pull_request_target (both extensions)
+grep -nE 'pull_request_target' .github/workflows/*.yml .github/workflows/*.yaml 2>/dev/null
+
+# 5. Top-level permissions present (both extensions — matches the action checker)
+for f in .github/workflows/*.yml .github/workflows/*.yaml; do
+  [ -e "$f" ] || continue
   grep -qE '^permissions:' "$f" || echo "MISSING permissions: $f"
 done
 ```
