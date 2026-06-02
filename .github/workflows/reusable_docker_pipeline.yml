@@ -115,6 +115,7 @@ jobs:
     outputs:
       image-name: ${{ steps.set_image_name.outputs.IMAGE_NAME }}
       matrix: ${{ steps.set_matrix.outputs.MATRIX }}
+      image-tag: ${{ steps.set_image_tag.outputs.IMAGE_TAG }}
     steps:
       - name: Determine image name
         id: set_image_name
@@ -139,6 +140,37 @@ jobs:
           else
             echo "MATRIX={\"include\":[{\"platform\":\"linux/amd64\",\"runner\":\"${RUNS_ON_AMD64}\"},{\"platform\":\"linux/arm64\",\"runner\":\"${RUNS_ON_ARM64}\"}]}" >> $GITHUB_OUTPUT
           fi
+
+      # Resolve a single Docker-safe IMAGE_TAG once and reuse it across the
+      # build and merge jobs. Resolution order:
+      #   1. inputs.imageTag (caller override)
+      #   2. ref name on tag events (e.g. v0.1.0)
+      #   3. github.sha
+      # Then sanitize to match docker/metadata-action: replace any char
+      # outside [A-Za-z0-9._-] with `-`, and strip leading `-`/`.` which
+      # Docker rejects. This prevents tags like `release/v1.0.0` or
+      # `v1.0.0+build.1` from producing invalid intermediate Docker tags.
+      - name: Determine image tag
+        id: set_image_tag
+        env:
+          INPUT_IMAGE_TAG: ${{ inputs.imageTag }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+          GIT_SHA: ${{ github.sha }}
+        run: |
+          if [ -n "$INPUT_IMAGE_TAG" ]; then
+            RAW="$INPUT_IMAGE_TAG"
+          elif [ "$REF_TYPE" = "tag" ]; then
+            RAW="$REF_NAME"
+          else
+            RAW="$GIT_SHA"
+          fi
+          SAFE=$(printf '%s' "$RAW" | sed -E -e 's|[^A-Za-z0-9_.-]|-|g' -e 's|^[.-]+||')
+          if [ -z "$SAFE" ]; then
+            echo "::error::Resolved image tag is empty after sanitization (raw='$RAW')"
+            exit 1
+          fi
+          echo "IMAGE_TAG=$SAFE" >> "$GITHUB_OUTPUT"
 
   dockerfile_lint:
     runs-on: ${{ inputs.runs_on_amd64 }}
@@ -487,7 +519,7 @@ jobs:
           DOCKERHUB_REGISTRY: ${{ vars.DOCKERHUB_REGISTRY_ID || 'babylonlabs' }}
           IMAGE_NAME: ${{ needs.prepare-metadata.outputs.image-name }}
           BUILD_PREFIX: ${{ inputs.buildArtifactPrefix }}
-          IMAGE_TAG: ${{ inputs.imageTag || (github.ref_type == 'tag' && github.ref_name) || github.sha }}
+          IMAGE_TAG: ${{ needs.prepare-metadata.outputs.image-tag }}
           GIT_SHA: ${{ github.sha }}
         run: |
           REPO="${DOCKERHUB_REGISTRY}/${IMAGE_NAME}"
@@ -500,10 +532,7 @@ jobs:
           AWS_ECR_REGISTRY_ID: ${{ vars.AWS_ECR_REGISTRY_ID }}
           IMAGE_NAME: ${{ needs.prepare-metadata.outputs.image-name }}
           BUILD_PREFIX: ${{ inputs.buildArtifactPrefix }}
-          # Use tag ref on tag events so per-platform intermediates don't collide
-          # with the SHA-named ones produced by a prior branch push at the same SHA
-          # (ECR tag immutability rejects re-pushing identical <sha>-<platform> tags).
-          IMAGE_TAG: ${{ inputs.imageTag || (github.ref_type == 'tag' && github.ref_name) || github.sha }}
+          IMAGE_TAG: ${{ needs.prepare-metadata.outputs.image-tag }}
           GIT_SHA: ${{ github.sha }}
         run: |
           REPO="${AWS_ECR_REGISTRY_ID}/${IMAGE_NAME}"
@@ -546,8 +575,7 @@ jobs:
           DOCKERHUB_REGISTRY: ${{ vars.DOCKERHUB_REGISTRY_ID || 'babylonlabs' }}
           IMAGE_NAME: ${{ needs.prepare-metadata.outputs.image-name }}
           BUILD_MATRIX: ${{ needs.prepare-metadata.outputs.matrix }}
-          # Must match the IMAGE_TAG used in docker_build's push step
-          IMAGE_TAG: ${{ inputs.imageTag || (github.ref_type == 'tag' && github.ref_name) || github.sha }}
+          IMAGE_TAG: ${{ needs.prepare-metadata.outputs.image-tag }}
         run: |
           first_tag=$(jq -r '.tags[0] // empty' <<< "$DOCKER_METADATA_OUTPUT_JSON")
           if [ -z "$first_tag" ]; then
@@ -609,8 +637,7 @@ jobs:
           AWS_ECR_REGISTRY_ID: ${{ vars.AWS_ECR_REGISTRY_ID }}
           IMAGE_NAME: ${{ needs.prepare-metadata.outputs.image-name }}
           BUILD_MATRIX: ${{ needs.prepare-metadata.outputs.matrix }}
-          # Must match the IMAGE_TAG used in docker_build's push step
-          IMAGE_TAG: ${{ inputs.imageTag || (github.ref_type == 'tag' && github.ref_name) || github.sha }}
+          IMAGE_TAG: ${{ needs.prepare-metadata.outputs.image-tag }}
         run: |
           first_tag=$(jq -r '.tags[0] // empty' <<< "$DOCKER_METADATA_OUTPUT_JSON")
           if [ -z "$first_tag" ]; then
