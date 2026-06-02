@@ -487,7 +487,7 @@ jobs:
           DOCKERHUB_REGISTRY: ${{ vars.DOCKERHUB_REGISTRY_ID || 'babylonlabs' }}
           IMAGE_NAME: ${{ needs.prepare-metadata.outputs.image-name }}
           BUILD_PREFIX: ${{ inputs.buildArtifactPrefix }}
-          IMAGE_TAG: ${{ inputs.imageTag || github.sha }}
+          IMAGE_TAG: ${{ inputs.imageTag || (github.ref_type == 'tag' && github.ref_name) || github.sha }}
           GIT_SHA: ${{ github.sha }}
         run: |
           REPO="${DOCKERHUB_REGISTRY}/${IMAGE_NAME}"
@@ -500,7 +500,10 @@ jobs:
           AWS_ECR_REGISTRY_ID: ${{ vars.AWS_ECR_REGISTRY_ID }}
           IMAGE_NAME: ${{ needs.prepare-metadata.outputs.image-name }}
           BUILD_PREFIX: ${{ inputs.buildArtifactPrefix }}
-          IMAGE_TAG: ${{ inputs.imageTag || github.sha }}
+          # Use tag ref on tag events so per-platform intermediates don't collide
+          # with the SHA-named ones produced by a prior branch push at the same SHA
+          # (ECR tag immutability rejects re-pushing identical <sha>-<platform> tags).
+          IMAGE_TAG: ${{ inputs.imageTag || (github.ref_type == 'tag' && github.ref_name) || github.sha }}
           GIT_SHA: ${{ github.sha }}
         run: |
           REPO="${AWS_ECR_REGISTRY_ID}/${IMAGE_NAME}"
@@ -543,7 +546,8 @@ jobs:
           DOCKERHUB_REGISTRY: ${{ vars.DOCKERHUB_REGISTRY_ID || 'babylonlabs' }}
           IMAGE_NAME: ${{ needs.prepare-metadata.outputs.image-name }}
           BUILD_MATRIX: ${{ needs.prepare-metadata.outputs.matrix }}
-          IMAGE_TAG: ${{ inputs.imageTag || github.sha }}
+          # Must match the IMAGE_TAG used in docker_build's push step
+          IMAGE_TAG: ${{ inputs.imageTag || (github.ref_type == 'tag' && github.ref_name) || github.sha }}
         run: |
           first_tag=$(jq -r '.tags[0] // empty' <<< "$DOCKER_METADATA_OUTPUT_JSON")
           if [ -z "$first_tag" ]; then
@@ -605,7 +609,8 @@ jobs:
           AWS_ECR_REGISTRY_ID: ${{ vars.AWS_ECR_REGISTRY_ID }}
           IMAGE_NAME: ${{ needs.prepare-metadata.outputs.image-name }}
           BUILD_MATRIX: ${{ needs.prepare-metadata.outputs.matrix }}
-          IMAGE_TAG: ${{ inputs.imageTag || github.sha }}
+          # Must match the IMAGE_TAG used in docker_build's push step
+          IMAGE_TAG: ${{ inputs.imageTag || (github.ref_type == 'tag' && github.ref_name) || github.sha }}
         run: |
           first_tag=$(jq -r '.tags[0] // empty' <<< "$DOCKER_METADATA_OUTPUT_JSON")
           if [ -z "$first_tag" ]; then
