@@ -1,5 +1,11 @@
 name: Sync Branch
 
+# Security (Coinspect BPT-005): caller-supplied `workflow_call` inputs are passed
+# into shell steps only via `env:` and referenced as quoted variables — never
+# interpolated directly as `${{ inputs.* }}` inside `run:`. This workflow pins
+# `runs-on: ubuntu-24.04`, so callers cannot redirect it onto a privileged
+# self-hosted / Docker-in-Docker runner. Do NOT change it to run on such a runner.
+
 on:
   workflow_call:
     inputs:
