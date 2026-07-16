@@ -85,7 +85,7 @@ jobs:
         registry-url: 'https://registry.npmjs.org'
 
     - name: Install dependencies
-      run: npm install
+      run: npm ci
 
     - name: Run Lint
       if: ${{ inputs.run-lint }}
@@ -111,7 +111,9 @@ jobs:
       if: ${{ inputs.use-semantic-release }}
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      run: npx semantic-release
+      # --no forbids on-the-fly registry installs: runs the caller's lockfile-pinned
+      # copy or fails if semantic-release is not a declared dependency (BPT-056)
+      run: npm exec --no -- semantic-release
 
     - name: Publish package
       if: ${{ inputs.publish }}

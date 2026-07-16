@@ -1,6 +1,7 @@
 # CHANGELOG
 
 ## Unreleased
+- security: `reusable_node_lint_test` enforces lockfile-pinned installs — `npm install` becomes `npm ci`, and semantic-release runs via `npm exec --no -- semantic-release` so it executes the caller's lockfile-pinned copy and fails closed if undeclared, instead of `npx` fetching the latest registry version at run time (BPT-056; instance of BPT-049). Migration: callers must commit `package-lock.json`, and callers setting `use-semantic-release: true` must declare `semantic-release` in `devDependencies`. All current callers already comply.
 
 ## 0.19.2
 - ci: `reusable_check_pinned_actions` accepts `# unversioned` sentinel comment to allow SHA-only pinning for actions whose maintainers don't publish release tags (e.g. `dtolnay/rust-toolchain`). The SHA must still be a 40-char hex string; remote tag resolution is skipped.
