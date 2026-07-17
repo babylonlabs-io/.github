@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+## 0.20.0
+- security: **breaking** — remove `reusable_node_lint_test.yml` (BPT-056; instance of BPT-049). The workflow ran unpinned `npm install` and `npx semantic-release` in a job with `id-token: write`, `contents: write`, and `pull-requests: write`. It is no longer consumed: all former callers are archived or migrated to `babylon-toolkit`'s own release pipeline, and the last non-archived caller (`btc-staking-ts`) is scheduled for archival. Migration: repos still pinning historical tags for Node CI should move to the `babylon-toolkit` pipeline; the removed workflow remains reachable via tags ≤ v0.19.x and must not be adopted by new repos.
+
 ## 0.19.2
 - ci: `reusable_check_pinned_actions` accepts `# unversioned` sentinel comment to allow SHA-only pinning for actions whose maintainers don't publish release tags (e.g. `dtolnay/rust-toolchain`). The SHA must still be a 40-char hex string; remote tag resolution is skipped.
 

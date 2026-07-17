@@ -37,7 +37,6 @@ supply-chain change.** Rules below derive from real fixes here (PRs #56, #67, #7
     reusable_github_release.yml
     reusable_go_lint_test.yml
     reusable_go_releaser.yml
-    reusable_node_lint_test.yml         # npm OIDC trusted publishing
     reusable_sync_branch.yml
 CHANGELOG.md                            # update on every functional change
 ```
@@ -103,7 +102,6 @@ grant minimum at job level. Current grants and why:
 | Workflow | Scope | Reason |
 |---|---|---|
 | `reusable_docker_pipeline.yml` | `id-token: write`, `contents: read`, `security-events: write` | OIDC to AWS ECR; SARIF upload. |
-| `reusable_node_lint_test.yml` | `id-token: write`, `contents: write`, `pull-requests: write` | npm OIDC + semantic-release. |
 | `reusable_backport.yml` | `contents: write`, `pull-requests: write` | Open backport PR. |
 | `reusable_go_releaser.yml` | `contents: write` | Create release. |
 | `reusable_github_release.yml` | top-level `{}`, job `contents: write` | Create release. |
