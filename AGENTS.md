@@ -6,6 +6,8 @@ repos** via `uses: babylonlabs-io/.github/.github/workflows/<x>.yml@<ref>`. A me
 supply-chain change.** Rules below derive from real fixes here (PRs #56, #67, #73,
 #74, #76, #77, #78) — do not relax them.
 
+**Before changing any workflow, read and obey [SECURITY-GUARDRAILS.md](./SECURITY-GUARDRAILS.md).**
+
 ## Top rules
 
 1. **Never use `pull_request_target` with `actions/checkout` of the PR head.** That
