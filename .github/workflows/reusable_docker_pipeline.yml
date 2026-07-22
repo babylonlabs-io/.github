@@ -115,6 +115,7 @@ jobs:
     outputs:
       image-name: ${{ steps.set_image_name.outputs.IMAGE_NAME }}
       matrix: ${{ steps.set_matrix.outputs.MATRIX }}
+      image-tag: ${{ steps.set_image_tag.outputs.IMAGE_TAG }}
     steps:
       - name: Determine image name
         id: set_image_name
@@ -139,6 +140,28 @@ jobs:
           else
             echo "MATRIX={\"include\":[{\"platform\":\"linux/amd64\",\"runner\":\"${RUNS_ON_AMD64}\"},{\"platform\":\"linux/arm64\",\"runner\":\"${RUNS_ON_ARM64}\"}]}" >> $GITHUB_OUTPUT
           fi
+
+      - name: Determine image tag
+        id: set_image_tag
+        env:
+          INPUT_IMAGE_TAG: ${{ inputs.imageTag }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+          GIT_SHA: ${{ github.sha }}
+        run: |
+          if [ -n "$INPUT_IMAGE_TAG" ]; then
+            RAW="$INPUT_IMAGE_TAG"
+          elif [ "$REF_TYPE" = "tag" ]; then
+            RAW="$REF_NAME"
+          else
+            RAW="$GIT_SHA"
+          fi
+          SAFE=$(printf '%s' "$RAW" | sed -E -e 's|[^A-Za-z0-9_.-]|-|g' -e 's|^[.-]+||')
+          if [ -z "$SAFE" ]; then
+            echo "::error::Resolved image tag is empty after sanitization (raw='$RAW')"
+            exit 1
+          fi
+          echo "IMAGE_TAG=$SAFE" >> "$GITHUB_OUTPUT"
 
   dockerfile_lint:
     runs-on: ${{ inputs.runs_on_amd64 }}
@@ -487,7 +510,7 @@ jobs:
           DOCKERHUB_REGISTRY: ${{ vars.DOCKERHUB_REGISTRY_ID || 'babylonlabs' }}
           IMAGE_NAME: ${{ needs.prepare-metadata.outputs.image-name }}
           BUILD_PREFIX: ${{ inputs.buildArtifactPrefix }}
-          IMAGE_TAG: ${{ inputs.imageTag || github.sha }}
+          IMAGE_TAG: ${{ needs.prepare-metadata.outputs.image-tag }}
           GIT_SHA: ${{ github.sha }}
         run: |
           REPO="${DOCKERHUB_REGISTRY}/${IMAGE_NAME}"
@@ -500,12 +523,17 @@ jobs:
           AWS_ECR_REGISTRY_ID: ${{ vars.AWS_ECR_REGISTRY_ID }}
           IMAGE_NAME: ${{ needs.prepare-metadata.outputs.image-name }}
           BUILD_PREFIX: ${{ inputs.buildArtifactPrefix }}
-          IMAGE_TAG: ${{ inputs.imageTag || github.sha }}
+          IMAGE_TAG: ${{ needs.prepare-metadata.outputs.image-tag }}
           GIT_SHA: ${{ github.sha }}
         run: |
           REPO="${AWS_ECR_REGISTRY_ID}/${IMAGE_NAME}"
-          docker tag "local-scan:${BUILD_PREFIX}${GIT_SHA}" "$REPO:${IMAGE_TAG}-${PLATFORM_PAIR}"
-          docker push "$REPO:${IMAGE_TAG}-${PLATFORM_PAIR}"
+          TAG="${IMAGE_TAG}-${PLATFORM_PAIR}"
+          if aws ecr describe-images --repository-name "$IMAGE_NAME" --image-ids imageTag="$TAG" >/dev/null 2>&1; then
+            echo "$REPO:$TAG already present in ECR, skipping push"
+          else
+            docker tag "local-scan:${BUILD_PREFIX}${GIT_SHA}" "$REPO:$TAG"
+            docker push "$REPO:$TAG"
+          fi
 
   merge_dockerhub:
     runs-on: ${{ inputs.runs_on_amd64 }}
@@ -543,7 +571,7 @@ jobs:
           DOCKERHUB_REGISTRY: ${{ vars.DOCKERHUB_REGISTRY_ID || 'babylonlabs' }}
           IMAGE_NAME: ${{ needs.prepare-metadata.outputs.image-name }}
           BUILD_MATRIX: ${{ needs.prepare-metadata.outputs.matrix }}
-          IMAGE_TAG: ${{ inputs.imageTag || github.sha }}
+          IMAGE_TAG: ${{ needs.prepare-metadata.outputs.image-tag }}
         run: |
           first_tag=$(jq -r '.tags[0] // empty' <<< "$DOCKER_METADATA_OUTPUT_JSON")
           if [ -z "$first_tag" ]; then
@@ -605,7 +633,7 @@ jobs:
           AWS_ECR_REGISTRY_ID: ${{ vars.AWS_ECR_REGISTRY_ID }}
           IMAGE_NAME: ${{ needs.prepare-metadata.outputs.image-name }}
           BUILD_MATRIX: ${{ needs.prepare-metadata.outputs.matrix }}
-          IMAGE_TAG: ${{ inputs.imageTag || github.sha }}
+          IMAGE_TAG: ${{ needs.prepare-metadata.outputs.image-tag }}
         run: |
           first_tag=$(jq -r '.tags[0] // empty' <<< "$DOCKER_METADATA_OUTPUT_JSON")
           if [ -z "$first_tag" ]; then
@@ -613,7 +641,11 @@ jobs:
           fi
           REPO="${AWS_ECR_REGISTRY_ID}/${IMAGE_NAME}"
           source_tags=$(echo "$BUILD_MATRIX" | jq -r '.include[].platform | gsub("/"; "-")' | xargs -I{} echo "$REPO:${IMAGE_TAG}-{}" | tr '\n' ' ')
-          docker buildx imagetools create -t "$first_tag" $source_tags
+          if aws ecr describe-images --repository-name "$IMAGE_NAME" --image-ids imageTag="${first_tag##*:}" >/dev/null 2>&1; then
+            echo "$first_tag already present in ECR, skipping manifest creation"
+          else
+            docker buildx imagetools create -t "$first_tag" $source_tags
+          fi
 
       - name: Inspect image
         env:

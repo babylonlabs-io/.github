@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.20.1
+- reusable_docker_pipeline: resolve `IMAGE_TAG` to the ref name on tag events so a tag push no longer collides with the `<sha>`-named intermediate tags left by an earlier branch build of the same commit
+- reusable_docker_pipeline: skip ECR pushes when the target tag already exists, making re-runs idempotent against ECR tag immutability
+
 ## 0.20.0
 - security: **breaking** — remove `reusable_node_lint_test.yml` (BPT-056; instance of BPT-049). The workflow ran unpinned `npm install` and `npx semantic-release` in a job with `id-token: write`, `contents: write`, and `pull-requests: write`. It is no longer consumed: all former callers are archived or migrated to `babylon-toolkit`'s own release pipeline, and the last non-archived caller (`btc-staking-ts`) is scheduled for archival. Migration: repos still pinning historical tags for Node CI should move to the `babylon-toolkit` pipeline; the removed workflow remains reachable via tags ≤ v0.19.x and must not be adopted by new repos.
 
