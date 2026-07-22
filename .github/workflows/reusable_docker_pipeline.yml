@@ -141,15 +141,6 @@ jobs:
             echo "MATRIX={\"include\":[{\"platform\":\"linux/amd64\",\"runner\":\"${RUNS_ON_AMD64}\"},{\"platform\":\"linux/arm64\",\"runner\":\"${RUNS_ON_ARM64}\"}]}" >> $GITHUB_OUTPUT
           fi
 
-      # Resolve a single Docker-safe IMAGE_TAG once and reuse it across the
-      # build and merge jobs. Resolution order:
-      #   1. inputs.imageTag (caller override)
-      #   2. ref name on tag events (e.g. v0.1.0)
-      #   3. github.sha
-      # Then sanitize to match docker/metadata-action: replace any char
-      # outside [A-Za-z0-9._-] with `-`, and strip leading `-`/`.` which
-      # Docker rejects. This prevents tags like `release/v1.0.0` or
-      # `v1.0.0+build.1` from producing invalid intermediate Docker tags.
       - name: Determine image tag
         id: set_image_tag
         env:
@@ -536,8 +527,13 @@ jobs:
           GIT_SHA: ${{ github.sha }}
         run: |
           REPO="${AWS_ECR_REGISTRY_ID}/${IMAGE_NAME}"
-          docker tag "local-scan:${BUILD_PREFIX}${GIT_SHA}" "$REPO:${IMAGE_TAG}-${PLATFORM_PAIR}"
-          docker push "$REPO:${IMAGE_TAG}-${PLATFORM_PAIR}"
+          TAG="${IMAGE_TAG}-${PLATFORM_PAIR}"
+          if aws ecr describe-images --repository-name "$IMAGE_NAME" --image-ids imageTag="$TAG" >/dev/null 2>&1; then
+            echo "$REPO:$TAG already present in ECR, skipping push"
+          else
+            docker tag "local-scan:${BUILD_PREFIX}${GIT_SHA}" "$REPO:$TAG"
+            docker push "$REPO:$TAG"
+          fi
 
   merge_dockerhub:
     runs-on: ${{ inputs.runs_on_amd64 }}
@@ -645,7 +641,11 @@ jobs:
           fi
           REPO="${AWS_ECR_REGISTRY_ID}/${IMAGE_NAME}"
           source_tags=$(echo "$BUILD_MATRIX" | jq -r '.include[].platform | gsub("/"; "-")' | xargs -I{} echo "$REPO:${IMAGE_TAG}-{}" | tr '\n' ' ')
-          docker buildx imagetools create -t "$first_tag" $source_tags
+          if aws ecr describe-images --repository-name "$IMAGE_NAME" --image-ids imageTag="${first_tag##*:}" >/dev/null 2>&1; then
+            echo "$first_tag already present in ECR, skipping manifest creation"
+          else
+            docker buildx imagetools create -t "$first_tag" $source_tags
+          fi
 
       - name: Inspect image
         env:
