@@ -265,6 +265,15 @@ jobs:
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0 https://github.com/docker/setup-buildx-action/releases/tag/v3.12.0
+      # GUARDRAIL DEVIATION (no `environment:` gate on docker_build, see
+      # SECURITY-GUARDRAILS "gate privileged jobs behind an environment"):
+      # this job already reads the org PRIVATE_REPO_TOKEN / GO_PRIVATE_TOKEN
+      # PATs and publishes with id-token: write without an environment, in
+      # every caller. Compensating control: the App token is Contents: read
+      # only, scoped per job to the dependency repositories, and revoked when
+      # the job ends, so it is strictly narrower than the PATs it replaces.
+      # Gating this shared build job behind an environment changes every
+      # caller and is tracked separately in devops-backlog#298.
       # Prefer a per-job GitHub App installation token (tbv-protocol-deps-ro,
       # Contents: read, revoked when the job ends) over the long-lived
       # PRIVATE_REPO_TOKEN / GO_PRIVATE_TOKEN PATs. continue-on-error keeps the
