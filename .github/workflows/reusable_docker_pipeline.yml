@@ -46,6 +46,11 @@ on:
         description: 'Enable authentication for private Vault private repositories'
         type: boolean
         default: false
+      private_repos:
+        required: false
+        type: string
+        description: 'Comma-separated babylonlabs-io repositories the GitHub App token may read (private build-time dependencies). Empty = every repository the App is installed on.'
+        default: ''
       docker_scan:
         required: false
         type: boolean
@@ -260,6 +265,30 @@ jobs:
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0 https://github.com/docker/setup-buildx-action/releases/tag/v3.12.0
+      # GUARDRAIL DEVIATION (no `environment:` gate on docker_build, see
+      # SECURITY-GUARDRAILS "gate privileged jobs behind an environment"):
+      # this job already reads the org PRIVATE_REPO_TOKEN / GO_PRIVATE_TOKEN
+      # PATs and publishes with id-token: write without an environment, in
+      # every caller. Compensating control: the App token is Contents: read
+      # only, scoped per job to the dependency repositories, and revoked when
+      # the job ends, so it is strictly narrower than the PATs it replaces.
+      # Gating this shared build job behind an environment changes every
+      # caller and is tracked separately in devops-backlog#298.
+      # Private build-time dependencies are fetched with a per-job GitHub App
+      # installation token (tbv-protocol-deps-ro, Contents: read, revoked when
+      # the job ends). There is no PAT fallback: a caller that enables
+      # private-repos-authentication must be able to see the org var/secret,
+      # otherwise this step fails the job.
+      - name: Mint dependency read token (GitHub App)
+        id: deps_token
+        if: inputs.private-repos-authentication || inputs.go-private-repos-authentication
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0 https://github.com/actions/create-github-app-token/releases/tag/v3.2.0
+        with:
+          app-id: ${{ vars.TBV_DEPS_APP_ID }}
+          private-key: ${{ secrets.TBV_DEPS_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ inputs.private_repos }}
+          permission-contents: read
       # This block is used to not hard-coded the secrets in Build Docker image
       # Secrets are only added when necessary
       - name: Generate and mask build secrets
@@ -267,8 +296,8 @@ jobs:
         env:
           GO_PRIVATE_AUTH: ${{ inputs.go-private-repos-authentication }}
           PRIVATE_AUTH: ${{ inputs.private-repos-authentication }}
-          GO_PRIVATE_TOKEN: ${{ secrets.GO_PRIVATE_TOKEN }}
-          PRIVATE_REPO_TOKEN_VALUE: ${{ secrets.PRIVATE_REPO_TOKEN }}
+          GO_PRIVATE_TOKEN: ${{ steps.deps_token.outputs.token }}
+          PRIVATE_REPO_TOKEN_VALUE: ${{ steps.deps_token.outputs.token }}
         run: |
           SECRETS=""
           if [ "$GO_PRIVATE_AUTH" == "true" ]; then
