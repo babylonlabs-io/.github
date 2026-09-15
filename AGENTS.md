@@ -136,7 +136,9 @@ Today's references:
   same App token and writes it into a git URL rewrite limited to
   `https://github.com/babylonlabs-io/` so `go get` resolves private modules —
   a process-global write to `~/.gitconfig`, not a BuildKit mount: keep the
-  rewrite org-scoped and never print git config or `go env` with it set.
+  rewrite org-scoped and never dump git config (`git config --list`, `cat
+  ~/.gitconfig`) while it is set. `go env` is safe — it does not include git
+  config — which is why the build job may print it right after the rewrite.
 - `vars.AWS_ECR_{ACCOUNT,REGION,REGISTRY_ID}`, `vars.DOCKERHUB_REGISTRY_ID`,
   `vars.BABYLON_ALLOWED_SIGNERS` — non-secret config.
 
