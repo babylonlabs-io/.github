@@ -58,6 +58,11 @@ on:
         description: 'Enable authentication for private repositories'
         type: boolean
         default: false
+      private_repos:
+        description: 'Comma-separated babylonlabs-io repositories the GitHub App token may read (private Go module dependencies). Empty = every repository the App is installed on.'
+        required: false
+        type: string
+        default: ''
       testdata-url:
         description: 'Optional URL to the test data file for unit tests'
         required: false
@@ -84,12 +89,27 @@ jobs:
         with:
           go-version: ${{ inputs.go-version }}
 
+      # Private Go modules are fetched with a per-job GitHub App installation
+      # token (tbv-protocol-deps-ro, Contents: read, scoped to `private_repos`,
+      # revoked when the job ends) instead of the org GO_PRIVATE_TOKEN PAT. The
+      # rewrite is limited to the org so public modules keep fetching anonymously.
+      - name: Mint private module read token (GitHub App)
+        id: deps_token
+        if: ${{ inputs.go-private-repos-authentication }}
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0 https://github.com/actions/create-github-app-token/releases/tag/v3.2.0
+        with:
+          app-id: ${{ vars.TBV_DEPS_APP_ID }}
+          private-key: ${{ secrets.TBV_DEPS_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ inputs.private_repos }}
+          permission-contents: read
+
       - name: Configure Private Module Access
         if: ${{ inputs.go-private-repos-authentication }}
         env:
-          GO_PRIVATE_TOKEN: ${{ secrets.GO_PRIVATE_TOKEN }}
+          GO_PRIVATE_TOKEN: ${{ steps.deps_token.outputs.token }}
         run: |
-          git config --global url."https://${GO_PRIVATE_TOKEN}@github.com/".insteadOf "https://github.com/"
+          git config --global url."https://x-access-token:${GO_PRIVATE_TOKEN}@github.com/babylonlabs-io/".insteadOf "https://github.com/babylonlabs-io/"
 
       - name: Print Go environment
         run: go env
@@ -127,12 +147,27 @@ jobs:
         with:
           go-version: ${{ inputs.go-version }}
 
+      # Private Go modules are fetched with a per-job GitHub App installation
+      # token (tbv-protocol-deps-ro, Contents: read, scoped to `private_repos`,
+      # revoked when the job ends) instead of the org GO_PRIVATE_TOKEN PAT. The
+      # rewrite is limited to the org so public modules keep fetching anonymously.
+      - name: Mint private module read token (GitHub App)
+        id: deps_token
+        if: ${{ inputs.go-private-repos-authentication }}
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0 https://github.com/actions/create-github-app-token/releases/tag/v3.2.0
+        with:
+          app-id: ${{ vars.TBV_DEPS_APP_ID }}
+          private-key: ${{ secrets.TBV_DEPS_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ inputs.private_repos }}
+          permission-contents: read
+
       - name: Configure Private Module Access
         if: ${{ inputs.go-private-repos-authentication }}
         env:
-          GO_PRIVATE_TOKEN: ${{ secrets.GO_PRIVATE_TOKEN }}
+          GO_PRIVATE_TOKEN: ${{ steps.deps_token.outputs.token }}
         run: |
-          git config --global url."https://${GO_PRIVATE_TOKEN}@github.com/".insteadOf "https://github.com/"
+          git config --global url."https://x-access-token:${GO_PRIVATE_TOKEN}@github.com/babylonlabs-io/".insteadOf "https://github.com/babylonlabs-io/"
 
       - name: Install Dependencies
         if: ${{ inputs.install-dependencies-command != '' }}
@@ -180,12 +215,27 @@ jobs:
         with:
           go-version: ${{ inputs.go-version }}
 
+      # Private Go modules are fetched with a per-job GitHub App installation
+      # token (tbv-protocol-deps-ro, Contents: read, scoped to `private_repos`,
+      # revoked when the job ends) instead of the org GO_PRIVATE_TOKEN PAT. The
+      # rewrite is limited to the org so public modules keep fetching anonymously.
+      - name: Mint private module read token (GitHub App)
+        id: deps_token
+        if: ${{ inputs.go-private-repos-authentication }}
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0 https://github.com/actions/create-github-app-token/releases/tag/v3.2.0
+        with:
+          app-id: ${{ vars.TBV_DEPS_APP_ID }}
+          private-key: ${{ secrets.TBV_DEPS_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ inputs.private_repos }}
+          permission-contents: read
+
       - name: Configure Private Module Access
         if: ${{ inputs.go-private-repos-authentication }}
         env:
-          GO_PRIVATE_TOKEN: ${{ secrets.GO_PRIVATE_TOKEN }}
+          GO_PRIVATE_TOKEN: ${{ steps.deps_token.outputs.token }}
         run: |
-          git config --global url."https://${GO_PRIVATE_TOKEN}@github.com/".insteadOf "https://github.com/"
+          git config --global url."https://x-access-token:${GO_PRIVATE_TOKEN}@github.com/babylonlabs-io/".insteadOf "https://github.com/babylonlabs-io/"
 
       - name: Install Dependencies
         if: ${{ inputs.install-dependencies-command != '' }}
@@ -217,12 +267,27 @@ jobs:
         with:
           go-version: ${{ inputs.go-version }}
 
+      # Private Go modules are fetched with a per-job GitHub App installation
+      # token (tbv-protocol-deps-ro, Contents: read, scoped to `private_repos`,
+      # revoked when the job ends) instead of the org GO_PRIVATE_TOKEN PAT. The
+      # rewrite is limited to the org so public modules keep fetching anonymously.
+      - name: Mint private module read token (GitHub App)
+        id: deps_token
+        if: ${{ inputs.go-private-repos-authentication }}
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0 https://github.com/actions/create-github-app-token/releases/tag/v3.2.0
+        with:
+          app-id: ${{ vars.TBV_DEPS_APP_ID }}
+          private-key: ${{ secrets.TBV_DEPS_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ inputs.private_repos }}
+          permission-contents: read
+
       - name: Configure Private Module Access
         if: ${{ inputs.go-private-repos-authentication }}
         env:
-          GO_PRIVATE_TOKEN: ${{ secrets.GO_PRIVATE_TOKEN }}
+          GO_PRIVATE_TOKEN: ${{ steps.deps_token.outputs.token }}
         run: |
-          git config --global url."https://${GO_PRIVATE_TOKEN}@github.com/".insteadOf "https://github.com/"
+          git config --global url."https://x-access-token:${GO_PRIVATE_TOKEN}@github.com/babylonlabs-io/".insteadOf "https://github.com/babylonlabs-io/"
 
       - name: Install Dependencies
         if: ${{ inputs.install-dependencies-command != '' }}
