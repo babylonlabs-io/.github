@@ -122,15 +122,21 @@ Today's references:
 - `secrets.GITHUB_TOKEN` — scope governed by `permissions:`.
 - `secrets.DOCKERHUB_{USERNAME,TOKEN}` — push in docker pipeline; pull-rate raise
   in `reusable_go_lint_test.yml`.
-- `secrets.GO_PRIVATE_TOKEN`, `secrets.PRIVATE_REPO_TOKEN` — used for private
-  repo access. Two carriers in this repo: (a) Docker builds route them through
-  `docker/build-push-action` `secrets:` (BuildKit mount), **never** baked into
-  image layers; (b) `reusable_go_lint_test.yml` writes `GO_PRIVATE_TOKEN` into a
-  global git URL rewrite (`git config --global url.\"https://${GO_PRIVATE_TOKEN}@github.com/\".insteadOf`)
-  so `go get` resolves private modules — that's a process-global write to
-  `~/.gitconfig`, not a BuildKit mount, so future hardening (e.g. moving to a
-  short-lived GitHub App token or sidecar) should audit this path. Masked with
-  `::add-mask::`.
+- `vars.TBV_DEPS_APP_ID` + `secrets.TBV_DEPS_APP_PRIVATE_KEY` — the GitHub App
+  `tbv-protocol-deps-ro` (Contents: read). `reusable_docker_pipeline.yml` mints a
+  per-job installation token from them (`actions/create-github-app-token`,
+  scoped to the caller's `private_repos` input, revoked when the job ends) and
+  routes it through `docker/build-push-action` `secrets:` as the BuildKit mounts
+  `PRIVATE_REPO_TOKEN` / `GO_PRIVATE_TOKEN`, **never** baked into image layers.
+  There is no PAT fallback: a caller that enables `private-repos-authentication`
+  or `go-private-repos-authentication` must be able to read both org values
+  (`secrets: inherit`), and every repository it lists must be in the App's
+  installation. Masked with `::add-mask::`.
+- `secrets.GO_PRIVATE_TOKEN` — still an org PAT in `reusable_go_lint_test.yml`,
+  written into a global git URL rewrite (`git config --global url.\"https://${GO_PRIVATE_TOKEN}@github.com/\".insteadOf`)
+  so `go get` resolves private modules — a process-global write to
+  `~/.gitconfig`, not a BuildKit mount. Moving this path to the same App token
+  is the remaining hardening step; audit it before widening anything.
 - `vars.AWS_ECR_{ACCOUNT,REGION,REGISTRY_ID}`, `vars.DOCKERHUB_REGISTRY_ID`,
   `vars.BABYLON_ALLOWED_SIGNERS` — non-secret config.
 
