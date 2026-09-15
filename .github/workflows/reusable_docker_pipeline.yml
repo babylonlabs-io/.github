@@ -274,15 +274,14 @@ jobs:
       # the job ends, so it is strictly narrower than the PATs it replaces.
       # Gating this shared build job behind an environment changes every
       # caller and is tracked separately in devops-backlog#298.
-      # Prefer a per-job GitHub App installation token (tbv-protocol-deps-ro,
-      # Contents: read, revoked when the job ends) over the long-lived
-      # PRIVATE_REPO_TOKEN / GO_PRIVATE_TOKEN PATs. continue-on-error keeps the
-      # PAT fallback below working for callers that do not yet see the App
-      # var/secret.
+      # Private build-time dependencies are fetched with a per-job GitHub App
+      # installation token (tbv-protocol-deps-ro, Contents: read, revoked when
+      # the job ends). There is no PAT fallback: a caller that enables
+      # private-repos-authentication must be able to see the org var/secret,
+      # otherwise this step fails the job.
       - name: Mint dependency read token (GitHub App)
         id: deps_token
         if: inputs.private-repos-authentication || inputs.go-private-repos-authentication
-        continue-on-error: true
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0 https://github.com/actions/create-github-app-token/releases/tag/v3.2.0
         with:
           app-id: ${{ vars.TBV_DEPS_APP_ID }}
@@ -297,8 +296,8 @@ jobs:
         env:
           GO_PRIVATE_AUTH: ${{ inputs.go-private-repos-authentication }}
           PRIVATE_AUTH: ${{ inputs.private-repos-authentication }}
-          GO_PRIVATE_TOKEN: ${{ steps.deps_token.outputs.token || secrets.GO_PRIVATE_TOKEN }}
-          PRIVATE_REPO_TOKEN_VALUE: ${{ steps.deps_token.outputs.token || secrets.PRIVATE_REPO_TOKEN }}
+          GO_PRIVATE_TOKEN: ${{ steps.deps_token.outputs.token }}
+          PRIVATE_REPO_TOKEN_VALUE: ${{ steps.deps_token.outputs.token }}
         run: |
           SECRETS=""
           if [ "$GO_PRIVATE_AUTH" == "true" ]; then
