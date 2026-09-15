@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.21.0
+- reusable_docker_pipeline: **breaking** — private build-time dependencies are fetched with a per-job GitHub App installation token (`tbv-protocol-deps-ro`, Contents: read, revoked when the job ends) instead of the org `PRIVATE_REPO_TOKEN` / `GO_PRIVATE_TOKEN` PATs; there is no PAT fallback. Callers that enable `private-repos-authentication` or `go-private-repos-authentication` must be able to read the org variable `TBV_DEPS_APP_ID` and secret `TBV_DEPS_APP_PRIVATE_KEY` (`secrets: inherit`) and should pass the new `private_repos` input (comma-separated repositories the token may read; empty = every repository the App is installed on). The BuildKit secret ids (`PRIVATE_REPO_TOKEN`, `GO_PRIVATE_TOKEN`) are unchanged, so Dockerfiles need no change.
+- release: v0.21.0 is the first tag after v0.19.1 and also ships the 0.19.2, 0.20.0 and 0.20.1 entries below.
+
 ## 0.20.1
 - reusable_docker_pipeline: resolve `IMAGE_TAG` to the ref name on tag events so a tag push no longer collides with the `<sha>`-named intermediate tags left by an earlier branch build of the same commit
 - reusable_docker_pipeline: skip ECR pushes when the target tag already exists, making re-runs idempotent against ECR tag immutability
