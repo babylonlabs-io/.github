@@ -132,11 +132,13 @@ Today's references:
   or `go-private-repos-authentication` must be able to read both org values
   (`secrets: inherit`), and every repository it lists must be in the App's
   installation. Masked with `::add-mask::`.
-- `secrets.GO_PRIVATE_TOKEN` — still an org PAT in `reusable_go_lint_test.yml`,
-  written into a global git URL rewrite (`git config --global url.\"https://${GO_PRIVATE_TOKEN}@github.com/\".insteadOf`)
-  so `go get` resolves private modules — a process-global write to
-  `~/.gitconfig`, not a BuildKit mount. Moving this path to the same App token
-  is the remaining hardening step; audit it before widening anything.
+- `reusable_go_lint_test.yml` (`go-private-repos-authentication`) mints the
+  same App token and writes it into a git URL rewrite limited to
+  `https://github.com/babylonlabs-io/` so `go get` resolves private modules —
+  a process-global write to `~/.gitconfig`, not a BuildKit mount: keep the
+  rewrite org-scoped and never dump git config (`git config --list`, `cat
+  ~/.gitconfig`) while it is set. `go env` is safe — it does not include git
+  config — which is why the build job may print it right after the rewrite.
 - `vars.AWS_ECR_{ACCOUNT,REGION,REGISTRY_ID}`, `vars.DOCKERHUB_REGISTRY_ID`,
   `vars.BABYLON_ALLOWED_SIGNERS` — non-secret config.
 

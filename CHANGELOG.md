@@ -1,6 +1,7 @@
 # CHANGELOG
 
 ## Unreleased
+- reusable_go_lint_test: `go-private-repos-authentication` now mints a per-job GitHub App installation token (`tbv-protocol-deps-ro`, Contents: read, scoped by the new `private_repos` input, revoked when the job ends) instead of reading the org `GO_PRIVATE_TOKEN` PAT; the git URL rewrite is limited to `https://github.com/babylonlabs-io/` and uses the `x-access-token` form. Same caller requirements as the docker pipeline (org variable `TBV_DEPS_APP_ID` + secret `TBV_DEPS_APP_PRIVATE_KEY` visible to the caller, `secrets: inherit`). No caller currently enables the input.
 
 ## 0.21.0
 - reusable_docker_pipeline: **breaking** — private build-time dependencies are fetched with a per-job GitHub App installation token (`tbv-protocol-deps-ro`, Contents: read, revoked when the job ends) instead of the org `PRIVATE_REPO_TOKEN` / `GO_PRIVATE_TOKEN` PATs; there is no PAT fallback. Callers that enable `private-repos-authentication` or `go-private-repos-authentication` must be able to read the org variable `TBV_DEPS_APP_ID` and secret `TBV_DEPS_APP_PRIVATE_KEY` (`secrets: inherit`) and should pass the new `private_repos` input (comma-separated repositories the token may read; empty = every repository the App is installed on). The BuildKit secret ids (`PRIVATE_REPO_TOKEN`, `GO_PRIVATE_TOKEN`) are unchanged, so Dockerfiles need no change.
