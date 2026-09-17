@@ -557,12 +557,23 @@ jobs:
         run: |
           REPO="${AWS_ECR_REGISTRY_ID}/${IMAGE_NAME}"
           TAG="${IMAGE_TAG}-${PLATFORM_PAIR}"
-          if aws ecr describe-images --repository-name "$IMAGE_NAME" --image-ids imageTag="$TAG" >/dev/null 2>&1; then
-            echo "$REPO:$TAG already present in ECR, skipping push"
-          else
-            docker tag "local-scan:${BUILD_PREFIX}${GIT_SHA}" "$REPO:$TAG"
-            docker push "$REPO:$TAG"
+          # An existing immutable tag is not evidence that this build published it.
+          # BatchGetImage is already permitted by gha-ecr-push; API errors must fail.
+          result=$(aws ecr batch-get-image --repository-name "$IMAGE_NAME" --image-ids "imageTag=$TAG" --output json)
+          if jq -e '.images | length > 0' <<< "$result" >/dev/null; then
+            echo "::error::$REPO:$TAG already exists. Refusing to accept unverified image content; publish a fresh tag."
+            exit 1
           fi
+          if ! jq -e --arg tag "$TAG" '
+            .images == [] and (.failures | length) == 1 and
+            .failures[0].failureCode == "ImageNotFound" and
+            .failures[0].imageId.imageTag == $tag
+          ' <<< "$result" >/dev/null; then
+            echo "::error::ECR did not confirm that $REPO:$TAG is absent. Refusing to publish."
+            exit 1
+          fi
+          docker tag "local-scan:${BUILD_PREFIX}${GIT_SHA}" "$REPO:$TAG"
+          docker push "$REPO:$TAG"
 
   merge_dockerhub:
     runs-on: ${{ inputs.runs_on_amd64 }}
@@ -670,11 +681,23 @@ jobs:
           fi
           REPO="${AWS_ECR_REGISTRY_ID}/${IMAGE_NAME}"
           source_tags=$(echo "$BUILD_MATRIX" | jq -r '.include[].platform | gsub("/"; "-")' | xargs -I{} echo "$REPO:${IMAGE_TAG}-{}" | tr '\n' ' ')
-          if aws ecr describe-images --repository-name "$IMAGE_NAME" --image-ids imageTag="${first_tag##*:}" >/dev/null 2>&1; then
-            echo "$first_tag already present in ECR, skipping manifest creation"
-          else
-            docker buildx imagetools create -t "$first_tag" $source_tags
+          TAG="${first_tag##*:}"
+          # An existing immutable tag is not evidence that this build published it.
+          # BatchGetImage is already permitted by gha-ecr-push; API errors must fail.
+          result=$(aws ecr batch-get-image --repository-name "$IMAGE_NAME" --image-ids "imageTag=$TAG" --output json)
+          if jq -e '.images | length > 0' <<< "$result" >/dev/null; then
+            echo "::error::$REPO:$TAG already exists. Refusing to accept unverified image content; publish a fresh tag."
+            exit 1
           fi
+          if ! jq -e --arg tag "$TAG" '
+            .images == [] and (.failures | length) == 1 and
+            .failures[0].failureCode == "ImageNotFound" and
+            .failures[0].imageId.imageTag == $tag
+          ' <<< "$result" >/dev/null; then
+            echo "::error::ECR did not confirm that $REPO:$TAG is absent. Refusing to publish."
+            exit 1
+          fi
+          docker buildx imagetools create -t "$first_tag" $source_tags
 
       - name: Inspect image
         env:
