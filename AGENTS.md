@@ -36,6 +36,7 @@ supply-chain change.** Rules below derive from real fixes here (PRs #56, #67, #7
     reusable_changelog_reminder.yml
     reusable_check_pinned_actions.yml   # the SHA-pin enforcer; do NOT weaken
     reusable_docker_pipeline.yml        # build + Trivy + Hadolint + push (OIDC)
+    test_ecr_tag_collisions.yml          # PR regression tests for ECR publication
     reusable_github_release.yml
     reusable_go_lint_test.yml
     reusable_go_releaser.yml
@@ -259,6 +260,13 @@ done
 ```
 
 CI: `reusable_check_pinned_actions.yml` runs on PR and gates SHA-pin rules.
+`test_ecr_tag_collisions.yml` runs publication regressions on PRs changing the
+Docker publication workflow, the test workflow, or tests.
+
+When editing ECR publication, also run `python3 -m unittest discover -s tests -v`
+(Python 3, `yq` v4, `jq`). Preserve the fail-closed tag lookup and immutable-tag
+collision rules in `SECURITY-GUARDRAILS.md`; rerun success needs verification of
+expected build content, not just a tag-existence check.
 
 ## Change checklist
 

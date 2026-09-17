@@ -26,6 +26,13 @@ Bad:  push an unsigned commit onto a PR branch, or check `github.actor == 'depen
 Good: commit signed by your hardware key; bot exemption keyed on `github.event.pull_request.user.id`.
 Enforced by: `.github/workflows/reusable_authenticate_commits.yml` (runs on every PR via org ruleset; verifies signatures through the Commits API).
 
+### Never accept an existing ECR tag solely because it exists
+Always: fail publication if a target platform or release tag already exists, unless a future implementation verifies that its content came from the expected build. Lookup failures must fail closed; only an explicit `ImageNotFound` for the requested tag permits a push. Keep immutable tags immutable and use a fresh tag for retries.
+Bad: `describe-images` succeeds, so skip publication and report success without checking the existing image.
+Good: use the already-authorized `BatchGetImage`, reject existing images and API failures, and preserve push failures if another publisher wins the immutable-tag race.
+Enforced by: `.github/workflows/test_ecr_tag_collisions.yml` runs `tests/test_ecr_tag_collisions.py` for PRs changing the publication workflow, regression workflow, or tests. It executes both actual publication shell blocks with mocked AWS/Docker responses. Run locally with `python3 -m unittest discover -s tests -v` (Python 3, `yq` v4, `jq`).
+Scope: this rule mitigates silent acceptance in [baby-auditor-infra-findings#14](https://github.com/babylonlabs-io/baby-auditor-infra-findings/issues/14); it does not authenticate deployment provenance or remove the accepted shared-role ability to publish new cross-service tags.
+
 ---
 
 ## Conventions (not yet CI-enforced)
