@@ -6,12 +6,12 @@ on:
       dockerfile:
         required: false
         type: string
-        description: "Path to Dockerfile"
+        description: "Path to the Dockerfile, relative to the repository root. Only [A-Za-z0-9_./-]; no URL, absolute path, '..' or leading '-'."
         default: "Dockerfile"
       dockerContext:
         required: false
         type: string
-        description: "The Docker context"
+        description: "Docker build context: a directory inside the checked-out repository, relative to its root. Only [A-Za-z0-9_./-]; remote contexts (URLs, git refs), absolute paths, '..' and a leading '-' are rejected."
         default: "."
       publish:
         required: true
@@ -24,7 +24,7 @@ on:
       imageTag:
         required: false
         type: string
-        description: "Custom image tag"
+        description: "Custom image tag. Used as given, never rewritten: must match ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,115}$ and must not end in -linux-amd64 / -linux-arm64. Empty = git tag name on tag events, commit SHA otherwise."
         default: ""
       buildArgs:
         type: string
@@ -126,6 +126,8 @@ jobs:
       matrix: ${{ steps.set_matrix.outputs.MATRIX }}
       runner-amd64: ${{ steps.set_matrix.outputs.RUNNER_AMD64 }}
       image-tag: ${{ steps.set_image_tag.outputs.IMAGE_TAG }}
+      docker-context: ${{ steps.set_build_paths.outputs.DOCKER_CONTEXT }}
+      dockerfile: ${{ steps.set_build_paths.outputs.DOCKERFILE }}
     steps:
       - name: Determine image name
         id: set_image_name
@@ -197,7 +199,16 @@ jobs:
             echo "RUNNER_AMD64=$RUNS_ON_AMD64"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Determine image tag
+      # The tag is a registry identity: two different source names must never
+      # become the same tag. The value is therefore used exactly as given or
+      # rejected, never rewritten (no "/" -> "-", no stripping, no truncation).
+      # Branch names are never used: without imageTag the tag is the git tag
+      # name on tag events and the commit SHA otherwise. 116 = 128 (registry
+      # limit) minus the "-linux-amd64" / "-linux-arm64" platform suffix, and
+      # that suffix is reserved so a release tag cannot name another release's
+      # platform tag. Changing this grammar is a security change: DevOps
+      # review, and extend tests/test_docker_pipeline_tag_context.py.
+      - name: Validate image tag
         id: set_image_tag
         env:
           INPUT_IMAGE_TAG: ${{ inputs.imageTag }}
@@ -205,19 +216,99 @@ jobs:
           REF_NAME: ${{ github.ref_name }}
           GIT_SHA: ${{ github.sha }}
         run: |
+          set -euo pipefail
+          # Byte-wise matching: A-Z must not match locale-specific letters.
+          LC_ALL=C
           if [ -n "$INPUT_IMAGE_TAG" ]; then
-            RAW="$INPUT_IMAGE_TAG"
+            source="imageTag input"
+            tag="$INPUT_IMAGE_TAG"
           elif [ "$REF_TYPE" = "tag" ]; then
-            RAW="$REF_NAME"
+            source="git tag name"
+            tag="$REF_NAME"
           else
-            RAW="$GIT_SHA"
+            source="commit SHA"
+            tag="$GIT_SHA"
           fi
-          SAFE=$(printf '%s' "$RAW" | sed -E -e 's|[^A-Za-z0-9_.-]|-|g' -e 's|^[.-]+||')
-          if [ -z "$SAFE" ]; then
-            echo "::error::Resolved image tag is empty after sanitization (raw='$RAW')"
+          if [[ "$tag" == *[[:cntrl:]]* ]]; then
+            echo "::error::Image tag ($source) contains control characters"
             exit 1
           fi
-          echo "IMAGE_TAG=$SAFE" >> "$GITHUB_OUTPUT"
+          tag_grammar='^[A-Za-z0-9_][A-Za-z0-9_.-]{0,115}$'
+          if [[ ! "$tag" =~ $tag_grammar ]]; then
+            echo "::error::Image tag '$tag' ($source) is not a canonical registry tag ($tag_grammar). It is not rewritten, because two different names could become the same tag; pass an imageTag that already matches."
+            exit 1
+          fi
+          case "$tag" in
+            *-linux-amd64|*-linux-arm64)
+              echo "::error::Image tag '$tag' ($source) ends in a platform suffix reserved for this workflow's per-platform tags"
+              exit 1
+              ;;
+          esac
+          echo "IMAGE_TAG=$tag" >> "$GITHUB_OUTPUT"
+
+      # Every platform leg must build the commit that was checked out, so the
+      # build context and the Dockerfile have to be paths inside the checkout.
+      # A remote context (URL, git ref, "github.com/org/repo#branch") is
+      # fetched by each leg on its own and can differ between amd64 and arm64;
+      # buildx also downloads a Dockerfile given as a URL. The grammar has no
+      # ":", "@", "#" or whitespace, and the emitted value always starts with
+      # "./", which buildx never treats as a URL or an option. This job has no
+      # checkout: symlinks are checked in docker_build after the checkout.
+      - name: Validate Docker context and Dockerfile paths
+        id: set_build_paths
+        env:
+          INPUT_DOCKER_CONTEXT: ${{ inputs.dockerContext }}
+          INPUT_DOCKERFILE: ${{ inputs.dockerfile }}
+        run: |
+          set -euo pipefail
+          # Byte-wise matching: A-Z must not match locale-specific letters.
+          LC_ALL=C
+          path_grammar='^[A-Za-z0-9_.][A-Za-z0-9_./-]{0,254}$'
+
+          # Sets $normalized to "." or "./a/b"; exits on anything else.
+          normalize_path() {
+            local input="$1" value="$2" segment
+            local -a segments
+            if [[ "$value" == *[[:cntrl:]]* ]]; then
+              echo "::error::$input contains control characters"
+              exit 1
+            fi
+            if [[ ! "$value" =~ $path_grammar ]]; then
+              echo "::error::$input '$value' must be a relative path inside the repository ($path_grammar). Remote contexts (URLs, git refs), absolute paths and a leading '-' are not supported."
+              exit 1
+            fi
+            normalized=""
+            IFS=/ read -r -a segments <<< "$value"
+            for segment in "${segments[@]}"; do
+              case "$segment" in
+                ""|.) continue ;;
+                ..)
+                  echo "::error::$input '$value' must not contain '..'"
+                  exit 1
+                  ;;
+              esac
+              # buildx reads a context starting with "github.com/" as a git URL.
+              if [[ -z "$normalized" && "$segment" == "github.com" ]]; then
+                echo "::error::$input '$value' looks like a remote git context; only paths inside the repository are supported"
+                exit 1
+              fi
+              normalized="$normalized/$segment"
+            done
+            normalized=".$normalized"
+          }
+
+          normalize_path dockerContext "$INPUT_DOCKER_CONTEXT"
+          docker_context="$normalized"
+          normalize_path dockerfile "$INPUT_DOCKERFILE"
+          dockerfile="$normalized"
+          if [[ "$dockerfile" == "." ]]; then
+            echo "::error::dockerfile must name a file, not the repository root"
+            exit 1
+          fi
+          {
+            echo "DOCKER_CONTEXT=$docker_context"
+            echo "DOCKERFILE=$dockerfile"
+          } >> "$GITHUB_OUTPUT"
 
   dockerfile_lint:
     runs-on: ${{ needs.prepare-metadata.outputs.runner-amd64 }}
@@ -235,7 +326,7 @@ jobs:
         output-file: hadolint-result.sarif
         format: sarif
         no-fail: ${{ inputs.hadolint_nofail }}
-        dockerfile: ${{ inputs.dockerfile }}
+        dockerfile: ${{ needs.prepare-metadata.outputs.dockerfile }}
 
     - name: Add Hadolint results to Job Summary
       if: inputs.docker_scan && always()
@@ -304,6 +395,50 @@ jobs:
 
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2 https://github.com/actions/checkout/releases/tag/v6.0.2
+
+      # prepare-metadata validated the spelling of both paths; this resolves
+      # symlinks in the checkout and fails unless the context directory and the
+      # Dockerfile's directory are physically inside the workspace.
+      - name: Confine Docker context to the checkout
+        env:
+          DOCKER_CONTEXT: ${{ needs.prepare-metadata.outputs.docker-context }}
+          DOCKERFILE: ${{ needs.prepare-metadata.outputs.dockerfile }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${GITHUB_WORKSPACE:-}" || -z "$DOCKER_CONTEXT" || -z "$DOCKERFILE" ]]; then
+            echo "::error::Workspace, Docker context or Dockerfile path is empty"
+            exit 1
+          fi
+          workspace=$(cd -- "$GITHUB_WORKSPACE" && pwd -P)
+          if [[ -z "$workspace" || "$workspace" == "/" ]]; then
+            echo "::error::GITHUB_WORKSPACE is not usable"
+            exit 1
+          fi
+          cd -- "$workspace"
+
+          confine_dir() {
+            local label="$1" dir="$2" resolved
+            if [ ! -d "$dir" ]; then
+              echo "::error::$label '$dir' is not a directory in the checkout"
+              exit 1
+            fi
+            resolved=$(cd -- "$dir" && pwd -P)
+            case "$resolved" in
+              "$workspace"|"$workspace"/*) ;;
+              *)
+                echo "::error::$label '$dir' resolves outside the checkout"
+                exit 1
+                ;;
+            esac
+          }
+
+          confine_dir "Docker context" "$DOCKER_CONTEXT"
+          if [ ! -f "$DOCKERFILE" ]; then
+            echo "::error::Dockerfile '$DOCKERFILE' is not a file in the checkout"
+            exit 1
+          fi
+          confine_dir "Dockerfile directory" "${DOCKERFILE%/*}"
+
       # ===========================================
       # PRE-PUSH VULNERABILITY SCANNING
       # Scan before any push to ensure only clean images reach registries
@@ -400,8 +535,8 @@ jobs:
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2 https://github.com/docker/build-push-action/releases/tag/v6.19.2
         with:
           platforms: ${{ matrix.platform }}
-          context: ${{ inputs.dockerContext }}
-          file: ${{ inputs.dockerfile }}
+          context: ${{ needs.prepare-metadata.outputs.docker-context }}
+          file: ${{ needs.prepare-metadata.outputs.dockerfile }}
           build-args: |
             ${{ inputs.buildArgs }}
           secrets: |
@@ -731,13 +866,12 @@ jobs:
         uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0 https://github.com/docker/metadata-action/releases/tag/v5.10.0
         with:
           images: ${{ vars.DOCKERHUB_REGISTRY_ID || 'babylonlabs' }}/${{ needs.prepare-metadata.outputs.image-name }}
-          # If inputs.imageTag is available, other tags will be ignored
-          # Priority only affects the order of tag generation, not which tag is chosen
+          # The one tag validated by prepare-metadata (imageTag, else the git
+          # tag name, else the commit SHA). The raw input is not read here:
+          # metadata-action would rewrite it with its own sanitizer.
           # e.g. babylonlabs/babylond:abc123sha (on push) or babylonlabs/babylond:v1.0.0 (on tag)
           tags: |
-            type=sha,enable=${{ !inputs.imageTag }},priority=100,prefix=,suffix=,format=long
-            type=ref,enable=${{ !inputs.imageTag }},priority=200,prefix=,suffix=,event=tag
-            type=raw,enable=${{ !!inputs.imageTag }},priority=300,value=${{ inputs.imageTag }}
+            type=raw,value=${{ needs.prepare-metadata.outputs.image-tag }}
 
       - name: Login to Docker Hub
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0 https://github.com/docker/login-action/releases/tag/v3.7.0
@@ -757,6 +891,11 @@ jobs:
             echo "No tag found in DOCKER_METADATA_OUTPUT_JSON"; exit 1
           fi
           REPO="${DOCKERHUB_REGISTRY}/${IMAGE_NAME}"
+          # The published tag must be the validated tag, byte for byte.
+          if [ "${first_tag##*:}" != "$IMAGE_TAG" ]; then
+            echo "::error::Final tag '$first_tag' does not carry the validated tag '$IMAGE_TAG'. Refusing to publish."
+            exit 1
+          fi
           source_tags=$(echo "$BUILD_MATRIX" | jq -r '.include[].platform | gsub("/"; "-")' | xargs -I{} echo "$REPO:${IMAGE_TAG}-{}" | tr '\n' ' ')
           docker buildx imagetools create -t "$first_tag" $source_tags
 
@@ -842,11 +981,10 @@ jobs:
           images: ${{ vars.AWS_ECR_REGISTRY_ID }}/${{ needs.prepare-metadata.outputs.image-name }}
           flavor: |
             latest=false
+          # The one tag validated by prepare-metadata; the raw input is not read here.
           # e.g. 123456789.dkr.ecr.us-east-1.amazonaws.com/babylond:abc123sha (on push) or .../babylond:v1.0.0 (on tag)
           tags: |
-            type=sha,enable=${{ !inputs.imageTag }},priority=100,prefix=,suffix=,format=long
-            type=ref,enable=${{ !inputs.imageTag }},priority=200,prefix=,suffix=,event=tag
-            type=raw,enable=${{ !!inputs.imageTag }},priority=300,value=${{ inputs.imageTag }}
+            type=raw,value=${{ needs.prepare-metadata.outputs.image-tag }}
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1 https://github.com/aws-actions/configure-aws-credentials/releases/tag/v4.3.1
@@ -874,6 +1012,11 @@ jobs:
             echo "No tag found in DOCKER_METADATA_OUTPUT_JSON"; exit 1
           fi
           REPO="${AWS_ECR_REGISTRY_ID}/${IMAGE_NAME}"
+          # The published tag must be the validated tag, byte for byte.
+          if [ "${first_tag##*:}" != "$IMAGE_TAG" ]; then
+            echo "::error::Final tag '$first_tag' does not carry the validated tag '$IMAGE_TAG'. Refusing to publish."
+            exit 1
+          fi
           source_tags=$(echo "$BUILD_MATRIX" | jq -r '.include[].platform | gsub("/"; "-")' | xargs -I{} echo "$REPO:${IMAGE_TAG}-{}" | tr '\n' ' ')
           TAG="${first_tag##*:}"
           # An existing immutable tag is not evidence that this build published it.
