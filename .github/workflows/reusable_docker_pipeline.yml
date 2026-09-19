@@ -396,9 +396,12 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2 https://github.com/actions/checkout/releases/tag/v6.0.2
 
-      # prepare-metadata validated the spelling of both paths; this resolves
-      # symlinks in the checkout and fails unless the context directory and the
-      # Dockerfile's directory are physically inside the workspace.
+      # prepare-metadata validated the spelling of both paths; this checks them
+      # against the checkout. A context or Dockerfile that is a symlink, or is
+      # reached through a symlinked directory, is refused outright (also when
+      # the target is inside the repository), so buildx only reads the files
+      # at the reviewed paths. The resolved directories must also be physically
+      # inside the workspace.
       - name: Confine Docker context to the checkout
         env:
           DOCKER_CONTEXT: ${{ needs.prepare-metadata.outputs.docker-context }}
@@ -432,9 +435,33 @@ jobs:
             esac
           }
 
+          # Every component of the path, including the last one. -L does not
+          # follow the link, so a link to a regular file is caught as well.
+          refuse_symlinks() {
+            local label="$1" path="$2" segment current="."
+            local -a segments
+            IFS=/ read -r -a segments <<< "$path"
+            for segment in "${segments[@]}"; do
+              case "$segment" in
+                ""|.) continue ;;
+                ..)
+                  echo "::error::$label '$path' must not contain '..'"
+                  exit 1
+                  ;;
+              esac
+              current="$current/$segment"
+              if [ -L "$current" ]; then
+                echo "::error::$label '$path': '$current' is a symlink. Symlinked build contexts and Dockerfiles are not supported."
+                exit 1
+              fi
+            done
+          }
+
+          refuse_symlinks "Docker context" "$DOCKER_CONTEXT"
           confine_dir "Docker context" "$DOCKER_CONTEXT"
+          refuse_symlinks "Dockerfile" "$DOCKERFILE"
           if [ ! -f "$DOCKERFILE" ]; then
-            echo "::error::Dockerfile '$DOCKERFILE' is not a file in the checkout"
+            echo "::error::Dockerfile '$DOCKERFILE' is not a regular file in the checkout"
             exit 1
           fi
           confine_dir "Dockerfile directory" "${DOCKERFILE%/*}"

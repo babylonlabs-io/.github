@@ -359,17 +359,34 @@ class DockerPipelineTagAndContext(unittest.TestCase):
             (root / 'work' / 'repo-evil').mkdir()
             (root / 'work' / 'repo-evil' / 'Dockerfile').write_text('FROM scratch\n')
             (workspace / 'prefix-link').symlink_to(root / 'work' / 'repo-evil')
+            # Dockerfiles that are themselves symlinks: to a regular file outside
+            # the workspace (PR #90 review), to one inside it, and a dangling one.
+            (workspace / 'Dockerfile.outside').symlink_to(outside / 'Dockerfile')
+            (workspace / 'Dockerfile.passwd').symlink_to('/etc/passwd')
+            (workspace / 'Dockerfile.inside').symlink_to('agent/Dockerfile')
+            (workspace / 'agent' / 'Dockerfile.up').symlink_to('../Dockerfile')
+            (workspace / 'Dockerfile.dangling').symlink_to('nowhere')
+            (workspace / 'contrib/images/link').symlink_to('app')
 
             def confine(context, dockerfile, workspace_env=str(workspace)):
                 return self.run_script(step['run'], dict(GITHUB_WORKSPACE=workspace_env, DOCKER_CONTEXT=context,
                                                          DOCKERFILE=dockerfile), cwd=str(workspace))
 
             for context, dockerfile in (('.', './Dockerfile'), ('./agent', './agent/Dockerfile'),
-                                        ('.', './contrib/images/app/Dockerfile'), ('./inside-link', './inside-link/Dockerfile')):
+                                        ('.', './contrib/images/app/Dockerfile'), ('./agent', './Dockerfile'),
+                                        ('./contrib/images/app', './contrib/images/app/Dockerfile')):
                 with self.subTest(context=context, dockerfile=dockerfile):
                     result, output, github_env, _ = confine(context, dockerfile)
                     self.assertEqual((result.returncode, output, github_env), (0, '', ''), result.stdout + result.stderr)
-            for context, dockerfile in (('./outside-link', './Dockerfile'), ('./root-link', './Dockerfile'),
+            for context, dockerfile in (('.', './Dockerfile.outside'), ('.', './Dockerfile.passwd'),
+                                        ('.', './Dockerfile.inside'), ('./agent', './agent/Dockerfile.up'),
+                                        ('.', './Dockerfile.dangling'),
+                                        # Reached through a symlinked directory, target inside the repository.
+                                        ('.', './inside-link/Dockerfile'), ('.', './contrib/images/link/Dockerfile'),
+                                        ('./inside-link', './Dockerfile'), ('./contrib/images/link', './Dockerfile'),
+                                        ('./inside-link', './inside-link/Dockerfile'),
+                                        ('.', './a/../Dockerfile'), ('./agent/..', './Dockerfile'),
+                                        ('./outside-link', './Dockerfile'), ('./root-link', './Dockerfile'),
                                         ('./parent-link', './Dockerfile'), ('./prefix-link', './Dockerfile'),
                                         ('.', './outside-link/Dockerfile'), ('.', './prefix-link/Dockerfile'),
                                         ('./missing', './Dockerfile'), ('./a-file', './Dockerfile'),
@@ -377,6 +394,23 @@ class DockerPipelineTagAndContext(unittest.TestCase):
                                         ('', './Dockerfile'), ('.', '')):
                 with self.subTest(context=context, dockerfile=dockerfile):
                     self.assert_rejected(*confine(context, dockerfile))
+            # Second layer on its own: the symlink refusal above shadows it, so call
+            # the shipped confine_dir function directly (the script up to its first
+            # check, then one call) and prove it rejects by physical location.
+            definitions, separator, _ = step['run'].partition('refuse_symlinks "Docker context" "$DOCKER_CONTEXT"\n')
+            self.assertTrue(separator)
+            self.assertIn('confine_dir() {', definitions)
+            for directory_name, accepted in (('./agent', True), ('.', True), ('./inside-link', True),
+                                             ('./outside-link', False), ('./prefix-link', False),
+                                             ('./root-link', False), ('./parent-link', False), ('./missing', False)):
+                with self.subTest(confine_dir=directory_name):
+                    outcome = self.run_script(definitions + f'confine_dir "test" "{directory_name}"\n',
+                                              dict(GITHUB_WORKSPACE=str(workspace), DOCKER_CONTEXT='.',
+                                                   DOCKERFILE='./Dockerfile'), cwd=str(workspace))
+                    if accepted:
+                        self.assertEqual(outcome[0].returncode, 0, outcome[0].stdout + outcome[0].stderr)
+                    else:
+                        self.assert_rejected(*outcome)
             self.assert_rejected(*confine('.', './Dockerfile', workspace_env=''))
             self.assert_rejected(*confine('.', './Dockerfile', workspace_env='/'))
 
