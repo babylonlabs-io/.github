@@ -89,12 +89,12 @@ on:
       runs_on_amd64:
         required: false
         type: string
-        description: 'Runner environment for AMD64'
+        description: 'Runner label for AMD64 jobs. Must be on the approved list in the prepare-metadata job (ubuntu-24.04, ubuntu-24.04-8core); a single label, not a JSON array.'
         default: 'ubuntu-24.04'
       runs_on_arm64:
         required: false
         type: string
-        description: 'Runner environment for ARM64'
+        description: 'Runner label for ARM64 builds. Must be on the approved list in the prepare-metadata job (ubuntu-24.04-arm64); a single label, not a JSON array.'
         default: 'ubuntu-24.04-arm64'
       timeout_minutes:
         required: false
@@ -115,11 +115,16 @@ permissions:
 
 jobs:
   prepare-metadata:
-    runs-on: ${{ inputs.runs_on_amd64 }}
+    # Fixed GitHub-hosted runner, no token permissions, no secrets: this job
+    # validates the caller-selected runner labels, so it must never run on one.
+    # Every other job takes its runner from this job's validated outputs.
+    runs-on: ubuntu-24.04
+    permissions: {}
     timeout-minutes: ${{ inputs.timeout_minutes }}
     outputs:
       image-name: ${{ steps.set_image_name.outputs.IMAGE_NAME }}
       matrix: ${{ steps.set_matrix.outputs.MATRIX }}
+      runner-amd64: ${{ steps.set_matrix.outputs.RUNNER_AMD64 }}
       image-tag: ${{ steps.set_image_tag.outputs.IMAGE_TAG }}
     steps:
       - name: Determine image name
@@ -127,24 +132,70 @@ jobs:
         env:
           REPO_NAME: ${{ inputs.repoName }}
         run: |
+          # A line break in the value would add lines to $GITHUB_OUTPUT.
+          if [[ "$REPO_NAME" == *[[:cntrl:]]* ]]; then
+            echo "::error::repoName contains control characters"
+            exit 1
+          fi
           if [ -n "$REPO_NAME" ]; then
-            echo "IMAGE_NAME=$REPO_NAME" >> $GITHUB_OUTPUT
+            echo "IMAGE_NAME=$REPO_NAME" >> "$GITHUB_OUTPUT"
           else
-            echo "IMAGE_NAME=$(echo "$GITHUB_REPOSITORY" | cut -d '/' -f 2)" >> $GITHUB_OUTPUT
+            echo "IMAGE_NAME=$(echo "$GITHUB_REPOSITORY" | cut -d '/' -f 2)" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Set build matrix
+      # Registry credentials follow the runner label, so callers may only pick
+      # from the approved ephemeral GitHub-hosted labels below. Self-hosted
+      # pools (arc-runner-set, arc-runner-set-dind, gpu, localnet) are not
+      # approved. Adding a label is a security change: DevOps review, and
+      # extend tests/test_docker_pipeline_runner_inputs.py.
+      - name: Validate runner labels and set build matrix
         id: set_matrix
         env:
           DISABLE_ARM64: ${{ inputs.disable_arm64 }}
           RUNS_ON_AMD64: ${{ inputs.runs_on_amd64 }}
           RUNS_ON_ARM64: ${{ inputs.runs_on_arm64 }}
         run: |
-          if [ "$DISABLE_ARM64" == "true" ]; then
-            echo "MATRIX={\"include\":[{\"platform\":\"linux/amd64\",\"runner\":\"${RUNS_ON_AMD64}\"}]}" >> $GITHUB_OUTPUT
+          set -euo pipefail
+          APPROVED_AMD64_RUNNERS=(ubuntu-24.04 ubuntu-24.04-8core)
+          APPROVED_ARM64_RUNNERS=(ubuntu-24.04-arm64)
+
+          validate_runner() {
+            local input="$1" value="$2" approved
+            shift 2
+            if [[ "$value" == *[[:cntrl:]]* ]]; then
+              echo "::error::$input contains control characters"
+              exit 1
+            fi
+            for approved in "$@"; do
+              if [[ "$value" == "$approved" ]]; then
+                return 0
+              fi
+            done
+            echo "::error::$input '$value' is not an approved runner label (approved: $*)"
+            exit 1
+          }
+
+          # Both inputs are checked even when ARM64 is disabled.
+          validate_runner runs_on_amd64 "$RUNS_ON_AMD64" "${APPROVED_AMD64_RUNNERS[@]}"
+          validate_runner runs_on_arm64 "$RUNS_ON_ARM64" "${APPROVED_ARM64_RUNNERS[@]}"
+
+          # jq encodes the values; key order (platform, runner) keeps the
+          # matrix job names unchanged.
+          if [ "$DISABLE_ARM64" = "true" ]; then
+            matrix=$(jq -cn --arg amd64 "$RUNS_ON_AMD64" \
+              '{include: [{platform: "linux/amd64", runner: $amd64}]}')
           else
-            echo "MATRIX={\"include\":[{\"platform\":\"linux/amd64\",\"runner\":\"${RUNS_ON_AMD64}\"},{\"platform\":\"linux/arm64\",\"runner\":\"${RUNS_ON_ARM64}\"}]}" >> $GITHUB_OUTPUT
+            matrix=$(jq -cn --arg amd64 "$RUNS_ON_AMD64" --arg arm64 "$RUNS_ON_ARM64" \
+              '{include: [{platform: "linux/amd64", runner: $amd64}, {platform: "linux/arm64", runner: $arm64}]}')
           fi
+          if [[ -z "$matrix" || "$matrix" == *[[:cntrl:]]* ]]; then
+            echo "::error::Build matrix is not a single line of JSON"
+            exit 1
+          fi
+          {
+            echo "MATRIX=$matrix"
+            echo "RUNNER_AMD64=$RUNS_ON_AMD64"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Determine image tag
         id: set_image_tag
@@ -169,8 +220,10 @@ jobs:
           echo "IMAGE_TAG=$SAFE" >> "$GITHUB_OUTPUT"
 
   dockerfile_lint:
-    runs-on: ${{ inputs.runs_on_amd64 }}
+    runs-on: ${{ needs.prepare-metadata.outputs.runner-amd64 }}
     timeout-minutes: ${{ inputs.timeout_minutes }}
+    needs:
+      - prepare-metadata
     steps:
     - name: Checkout repository
       if: inputs.docker_scan
@@ -214,11 +267,40 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJSON(needs.prepare-metadata.outputs.matrix) }}
     steps:
+      # Registry logins go to a per-job directory instead of the runner user's
+      # ~/.docker, and buildx state lives next to it so it survives the
+      # credential cleanup. Must stay the first step: setup-buildx and every
+      # login read these variables. The values are runner-generated paths.
+      - name: Use a job-scoped Docker config
+        run: |
+          set -euo pipefail
+          if [[ -z "${RUNNER_TEMP:-}" || "$RUNNER_TEMP" == *[[:cntrl:]]* ]]; then
+            echo "::error::RUNNER_TEMP is not usable"
+            exit 1
+          fi
+          docker_config=$(mktemp -d "$RUNNER_TEMP/docker-config.XXXXXX")
+          buildx_config=$(mktemp -d "$RUNNER_TEMP/buildx-config.XXXXXX")
+          {
+            echo "DOCKER_CONFIG=$docker_config"
+            echo "BUILDX_CONFIG=$buildx_config"
+          } >> "$GITHUB_ENV"
+
+      # Only fixed strings are written; matrix values never reach $GITHUB_ENV.
       - name: Prepare
+        id: prepare
         env:
           PLATFORM: ${{ matrix.platform }}
         run: |
-          echo "PLATFORM_PAIR=${PLATFORM//\//-}" >> $GITHUB_ENV
+          set -euo pipefail
+          case "$PLATFORM" in
+            linux/amd64) platform_pair=linux-amd64 ;;
+            linux/arm64) platform_pair=linux-arm64 ;;
+            *)
+              echo "::error::Unsupported matrix platform"
+              exit 1
+              ;;
+          esac
+          echo "platform_pair=$platform_pair" >> "$GITHUB_OUTPUT"
 
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2 https://github.com/actions/checkout/releases/tag/v6.0.2
@@ -504,7 +586,7 @@ jobs:
         uses: github/codeql-action/upload-sarif@38697555549f1db7851b81482ff19f1fa5c4fedc # v4.34.1 https://github.com/github/codeql-action/releases/tag/v4.34.1
         with:
           sarif_file: 'trivy-fs.sarif'
-          category: trivy-fs-${{ env.PLATFORM_PAIR }}
+          category: trivy-fs-${{ steps.prepare.outputs.platform_pair }}
 
       # ===========================================
       # PUSH TO REGISTRIES (only after scans pass)
@@ -540,6 +622,7 @@ jobs:
           IMAGE_NAME: ${{ needs.prepare-metadata.outputs.image-name }}
           BUILD_PREFIX: ${{ inputs.buildArtifactPrefix }}
           IMAGE_TAG: ${{ needs.prepare-metadata.outputs.image-tag }}
+          PLATFORM_PAIR: ${{ steps.prepare.outputs.platform_pair }}
           GIT_SHA: ${{ github.sha }}
         run: |
           REPO="${DOCKERHUB_REGISTRY}/${IMAGE_NAME}"
@@ -553,6 +636,7 @@ jobs:
           IMAGE_NAME: ${{ needs.prepare-metadata.outputs.image-name }}
           BUILD_PREFIX: ${{ inputs.buildArtifactPrefix }}
           IMAGE_TAG: ${{ needs.prepare-metadata.outputs.image-tag }}
+          PLATFORM_PAIR: ${{ steps.prepare.outputs.platform_pair }}
           GIT_SHA: ${{ github.sha }}
         run: |
           REPO="${AWS_ECR_REGISTRY_ID}/${IMAGE_NAME}"
@@ -575,8 +659,45 @@ jobs:
           docker tag "local-scan:${BUILD_PREFIX}${GIT_SHA}" "$REPO:$TAG"
           docker push "$REPO:$TAG"
 
+      # Runs even when the job failed or was cancelled, so a registry login
+      # never outlives the job on a reused runner.
+      - name: Remove registry credentials
+        if: always()
+        env:
+          AWS_ECR_REGISTRY_ID: ${{ vars.AWS_ECR_REGISTRY_ID }}
+        run: |
+          set -uo pipefail
+          if [ -z "${DOCKER_CONFIG:-}" ]; then
+            echo "No job-scoped Docker config was created; nothing to remove."
+            exit 0
+          fi
+          if [ -z "${RUNNER_TEMP:-}" ]; then
+            echo "::error::RUNNER_TEMP is not set; refusing to remove DOCKER_CONFIG"
+            exit 1
+          fi
+          case "$DOCKER_CONFIG" in
+            */..|*/../*)
+              echo "::error::DOCKER_CONFIG is not the job-scoped directory; refusing to remove it"
+              exit 1
+              ;;
+            "$RUNNER_TEMP"/docker-config.*) ;;
+            *)
+              echo "::error::DOCKER_CONFIG is not the job-scoped directory; refusing to remove it"
+              exit 1
+              ;;
+          esac
+          if [ -n "${AWS_ECR_REGISTRY_ID:-}" ]; then
+            docker logout "$AWS_ECR_REGISTRY_ID" || echo "::warning::docker logout failed for ECR"
+          fi
+          docker logout || echo "::warning::docker logout failed for Docker Hub"
+          rm -rf -- "$DOCKER_CONFIG" || true
+          if [ -e "$DOCKER_CONFIG" ]; then
+            echo "::error::Could not remove the job-scoped Docker config"
+            exit 1
+          fi
+
   merge_dockerhub:
-    runs-on: ${{ inputs.runs_on_amd64 }}
+    runs-on: ${{ needs.prepare-metadata.outputs.runner-amd64 }}
     timeout-minutes: ${{ inputs.timeout_minutes }}
     if: inputs.publish && inputs.push_to_dockerhub
     needs:
@@ -585,6 +706,24 @@ jobs:
     outputs:
       dockerhub_imgver: ${{ steps.meta.outputs.version }}
     steps:
+      # Registry logins go to a per-job directory instead of the runner user's
+      # ~/.docker, and buildx state lives next to it so it survives the
+      # credential cleanup. Must stay the first step: setup-buildx and every
+      # login read these variables. The values are runner-generated paths.
+      - name: Use a job-scoped Docker config
+        run: |
+          set -euo pipefail
+          if [[ -z "${RUNNER_TEMP:-}" || "$RUNNER_TEMP" == *[[:cntrl:]]* ]]; then
+            echo "::error::RUNNER_TEMP is not usable"
+            exit 1
+          fi
+          docker_config=$(mktemp -d "$RUNNER_TEMP/docker-config.XXXXXX")
+          buildx_config=$(mktemp -d "$RUNNER_TEMP/buildx-config.XXXXXX")
+          {
+            echo "DOCKER_CONFIG=$docker_config"
+            echo "BUILDX_CONFIG=$buildx_config"
+          } >> "$GITHUB_ENV"
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0 https://github.com/docker/setup-buildx-action/releases/tag/v3.12.0
       - name: Docker meta
@@ -629,8 +768,45 @@ jobs:
         run: |
           docker buildx imagetools inspect "${DOCKERHUB_REGISTRY}/${IMAGE_NAME}:${IMAGE_VERSION}"
 
+      # Runs even when the job failed or was cancelled, so a registry login
+      # never outlives the job on a reused runner.
+      - name: Remove registry credentials
+        if: always()
+        env:
+          AWS_ECR_REGISTRY_ID: ${{ vars.AWS_ECR_REGISTRY_ID }}
+        run: |
+          set -uo pipefail
+          if [ -z "${DOCKER_CONFIG:-}" ]; then
+            echo "No job-scoped Docker config was created; nothing to remove."
+            exit 0
+          fi
+          if [ -z "${RUNNER_TEMP:-}" ]; then
+            echo "::error::RUNNER_TEMP is not set; refusing to remove DOCKER_CONFIG"
+            exit 1
+          fi
+          case "$DOCKER_CONFIG" in
+            */..|*/../*)
+              echo "::error::DOCKER_CONFIG is not the job-scoped directory; refusing to remove it"
+              exit 1
+              ;;
+            "$RUNNER_TEMP"/docker-config.*) ;;
+            *)
+              echo "::error::DOCKER_CONFIG is not the job-scoped directory; refusing to remove it"
+              exit 1
+              ;;
+          esac
+          if [ -n "${AWS_ECR_REGISTRY_ID:-}" ]; then
+            docker logout "$AWS_ECR_REGISTRY_ID" || echo "::warning::docker logout failed for ECR"
+          fi
+          docker logout || echo "::warning::docker logout failed for Docker Hub"
+          rm -rf -- "$DOCKER_CONFIG" || true
+          if [ -e "$DOCKER_CONFIG" ]; then
+            echo "::error::Could not remove the job-scoped Docker config"
+            exit 1
+          fi
+
   merge_ecr:
-    runs-on: ${{ inputs.runs_on_amd64 }}
+    runs-on: ${{ needs.prepare-metadata.outputs.runner-amd64 }}
     timeout-minutes: ${{ inputs.timeout_minutes }}
     if: inputs.publish && inputs.push_to_ecr
     needs:
@@ -639,6 +815,24 @@ jobs:
     outputs:
       ecr_imgver: ${{ steps.meta.outputs.version }}
     steps:
+      # Registry logins go to a per-job directory instead of the runner user's
+      # ~/.docker, and buildx state lives next to it so it survives the
+      # credential cleanup. Must stay the first step: setup-buildx and every
+      # login read these variables. The values are runner-generated paths.
+      - name: Use a job-scoped Docker config
+        run: |
+          set -euo pipefail
+          if [[ -z "${RUNNER_TEMP:-}" || "$RUNNER_TEMP" == *[[:cntrl:]]* ]]; then
+            echo "::error::RUNNER_TEMP is not usable"
+            exit 1
+          fi
+          docker_config=$(mktemp -d "$RUNNER_TEMP/docker-config.XXXXXX")
+          buildx_config=$(mktemp -d "$RUNNER_TEMP/buildx-config.XXXXXX")
+          {
+            echo "DOCKER_CONFIG=$docker_config"
+            echo "BUILDX_CONFIG=$buildx_config"
+          } >> "$GITHUB_ENV"
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0 https://github.com/docker/setup-buildx-action/releases/tag/v3.12.0
       - name: Docker meta
@@ -706,3 +900,40 @@ jobs:
           IMAGE_VERSION: ${{ steps.meta.outputs.version }}
         run: |
           docker buildx imagetools inspect "${AWS_ECR_REGISTRY_ID}/${IMAGE_NAME}:${IMAGE_VERSION}"
+
+      # Runs even when the job failed or was cancelled, so a registry login
+      # never outlives the job on a reused runner.
+      - name: Remove registry credentials
+        if: always()
+        env:
+          AWS_ECR_REGISTRY_ID: ${{ vars.AWS_ECR_REGISTRY_ID }}
+        run: |
+          set -uo pipefail
+          if [ -z "${DOCKER_CONFIG:-}" ]; then
+            echo "No job-scoped Docker config was created; nothing to remove."
+            exit 0
+          fi
+          if [ -z "${RUNNER_TEMP:-}" ]; then
+            echo "::error::RUNNER_TEMP is not set; refusing to remove DOCKER_CONFIG"
+            exit 1
+          fi
+          case "$DOCKER_CONFIG" in
+            */..|*/../*)
+              echo "::error::DOCKER_CONFIG is not the job-scoped directory; refusing to remove it"
+              exit 1
+              ;;
+            "$RUNNER_TEMP"/docker-config.*) ;;
+            *)
+              echo "::error::DOCKER_CONFIG is not the job-scoped directory; refusing to remove it"
+              exit 1
+              ;;
+          esac
+          if [ -n "${AWS_ECR_REGISTRY_ID:-}" ]; then
+            docker logout "$AWS_ECR_REGISTRY_ID" || echo "::warning::docker logout failed for ECR"
+          fi
+          docker logout || echo "::warning::docker logout failed for Docker Hub"
+          rm -rf -- "$DOCKER_CONFIG" || true
+          if [ -e "$DOCKER_CONFIG" ]; then
+            echo "::error::Could not remove the job-scoped Docker config"
+            exit 1
+          fi

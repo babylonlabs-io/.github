@@ -33,6 +33,13 @@ Good: use the already-authorized `BatchGetImage`, reject existing images and API
 Enforced by: `.github/workflows/test_ecr_tag_collisions.yml` runs `tests/test_ecr_tag_collisions.py` for PRs changing the publication workflow, regression workflow, or tests. It executes both actual publication shell blocks with mocked AWS/Docker responses. Run locally with `python3 -m unittest discover -s tests -v` (Python 3, `yq` v4, `jq`).
 Scope: this rule mitigates silent acceptance in [baby-auditor-infra-findings#14](https://github.com/babylonlabs-io/baby-auditor-infra-findings/issues/14); it does not authenticate deployment provenance or remove the accepted shared-role ability to publish new cross-service tags.
 
+### Never run credentialed Docker jobs on a caller-chosen runner label
+Always: `reusable_docker_pipeline.yml` reads `runs_on_amd64` / `runs_on_arm64` in exactly one place — the `prepare-metadata` job, which runs on a fixed `ubuntu-24.04` runner with `permissions: {}` and no secrets, and accepts only the approved ephemeral GitHub-hosted labels (exact match, control characters rejected). Every other job takes `runs-on:` from that job's outputs. Build JSON with `jq --arg`, never string concatenation. Never write a caller-derived or matrix value to `$GITHUB_ENV`. Every job that logs in to a registry starts by pointing `DOCKER_CONFIG` at a fresh directory under `runner.temp` and ends with the `if: always()` "Remove registry credentials" step. Adding a runner label (in particular any self-hosted pool) needs `@babylonlabs-io/devops` review and a test update.
+Bad:  `runs-on: ${{ inputs.runs_on_amd64 }}`, `echo "MATRIX={\"runner\":\"${RUNS_ON_AMD64}\"}"`, `echo "PLATFORM_PAIR=$PLATFORM" >> $GITHUB_ENV`, or `docker login` into the runner user's `~/.docker`.
+Good: `runs-on: ${{ needs.prepare-metadata.outputs.runner-amd64 }}`; `jq -cn --arg amd64 "$RUNS_ON_AMD64" '{...}'` after the allowlist check; step outputs built from fixed strings.
+Enforced by: `.github/workflows/test_ecr_tag_collisions.yml` runs `tests/test_docker_pipeline_runner_inputs.py`, which executes the real validation, matrix and cleanup shell blocks (including the [baby-auditor-infra-findings#65](https://github.com/babylonlabs-io/baby-auditor-infra-findings/issues/65) payload and the self-hosted labels from [#55](https://github.com/babylonlabs-io/baby-auditor-infra-findings/issues/55)) and checks the `runs-on:` / `$GITHUB_ENV` / login-cleanup structure of every job ([#61](https://github.com/babylonlabs-io/baby-auditor-infra-findings/issues/61)).
+Scope: this limits where the workflow can run and what it leaves behind. Restricting the self-hosted runner groups to reviewed workflows is a GitHub org setting outside this repo.
+
 ---
 
 ## Conventions (not yet CI-enforced)
