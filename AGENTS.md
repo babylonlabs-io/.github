@@ -36,7 +36,7 @@ supply-chain change.** Rules below derive from real fixes here (PRs #56, #67, #7
     reusable_changelog_reminder.yml
     reusable_check_pinned_actions.yml   # the SHA-pin enforcer; do NOT weaken
     reusable_docker_pipeline.yml        # build + Trivy + Hadolint + push (OIDC)
-    test_ecr_tag_collisions.yml          # PR regression tests (tests/): ECR publication, runner inputs, Docker credential cleanup
+    test_ecr_tag_collisions.yml          # PR regression tests (tests/): ECR publication, runner inputs, image tag / build context validation, Docker credential cleanup
     reusable_github_release.yml
     reusable_go_lint_test.yml
     reusable_go_releaser.yml
@@ -261,14 +261,18 @@ done
 
 CI: `reusable_check_pinned_actions.yml` runs on PR and gates SHA-pin rules.
 `test_ecr_tag_collisions.yml` runs everything under `tests/` (ECR publication,
-runner-label validation, Docker credential cleanup) on PRs changing the Docker
+runner-label validation, image tag and build context validation, Docker
+credential cleanup) on PRs changing the Docker
 publication workflow, the test workflow, or tests.
 
 When editing the Docker pipeline, also run `python3 -m unittest discover -s tests -v`
 (Python 3, `yq` v4, `jq`). Runner labels for `reusable_docker_pipeline.yml` are an
 approved list in its `prepare-metadata` job — see "Never run credentialed Docker
 jobs on a caller-chosen runner label" in `SECURITY-GUARDRAILS.md` before touching
-`runs-on:`, the matrix, `$GITHUB_ENV` writes, or registry logins. Preserve the fail-closed tag lookup and immutable-tag
+`runs-on:`, the matrix, `$GITHUB_ENV` writes, or registry logins. `imageTag`,
+`dockerContext` and `dockerfile` are validated in the same job and never rewritten or
+re-read downstream — see "Never rewrite an image tag or build from outside the
+checkout". Preserve the fail-closed tag lookup and immutable-tag
 collision rules in `SECURITY-GUARDRAILS.md`; rerun success needs verification of
 expected build content, not just a tag-existence check.
 
