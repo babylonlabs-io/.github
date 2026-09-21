@@ -21,6 +21,30 @@ APPROVED_AMD64 = ['ubuntu-24.04', 'ubuntu-24.04-8core']
 APPROVED_ARM64 = ['ubuntu-24.04-arm64']
 ECR_REGISTRY = '123456789012.dkr.ecr.ap-east-1.amazonaws.com'
 
+# Every repoName callers pass today (gh search code --owner babylonlabs-io
+# repoName, default branches). Repository names are lowercase in both
+# registries, so the validation is the intersection of the Docker Hub (OCI
+# reference) and ECR grammars; these are the values it must keep accepting.
+CALLER_REPO_NAMES = [
+    'babylond', 'babylon-sdk', 'babylon-desk-bridge', 'babylon-desk-discord-adapter',
+    'aave-bots-indexer', 'aave-bots-svc', 'covenant-emulator', 'covenant-signer',
+    'finality-provider', 'finality-gadget',
+    # vault-provers passes "vault-provers${{ matrix.image_suffix }}".
+    'vault-provers-dev', 'vault-provers-devnet', 'vault-provers-testnet',
+]
+# Caller repositories that publish without a repoName, so the image name is the
+# repository name (gh search code --owner babylonlabs-io reusable_docker_pipeline.yml).
+CALLER_REPOSITORIES = [
+    'aml-mock-service', 'baby-oncall', 'baby-tester', 'baby-watchtower', 'babylon',
+    'babylon-btc-monitor', 'babylon-sidecar-api', 'babylon-staking-indexer',
+    'babylon-vault-indexer', 'bitcoind-exporter', 'btc-staker', 'btc-vault',
+    'cloudflare-exporter', 'coming-soon', 'countdown', 'devex-ai-bot', 'devops-test',
+    'eth-chain-probe', 'faucet', 'genesis-monitor', 'rollup-finality-gadget',
+    'staking-api-service', 'staking-expiry-checker', 'tbv-campaign', 'tbv-system-monitor',
+    'utils-api', 'vault-provider-proxy', 'vaults-load-test-framework', 'vigilante',
+    'babylon-ghsa-4rm2-cj74-f62h', 'vigilante-ghsa-9496-7cf2-7p6c',
+]
+
 # baby-auditor-infra-findings#65: closes the JSON string, appends a matrix entry
 # on the privileged DinD pool whose platform carries an escaped newline that
 # became a second $GITHUB_ENV assignment (BASH_ENV) in the build job.
@@ -140,34 +164,52 @@ class DockerPipelineRunnerInputs(unittest.TestCase):
 
     def test_image_name_accepts_the_names_callers_pass(self):
         script = self.step('prepare-metadata', step_id='set_image_name')['run']
-        # Every repoName passed by a caller today, plus the fallback.
-        for name in ('babylond', 'vault-provers', 'vault-provers-bsn', 'babylon-desk-bridge',
-                     'babylon-desk-discord-adapter', 'aave-bots-indexer', 'aave-bots-svc',
-                     'a', 'A', '1', 'a_b', 'a.b', 'a' * 128):
+        # Every repoName passed by a caller today (gh search code --owner
+        # babylonlabs-io repoName), plus the shapes the grammar allows.
+        for name in CALLER_REPO_NAMES + ['ab', 'a1', '1a', '12', 'a-b', 'a.b', 'a_b', 'a1.b2-c3_d4',
+                                         'a' * 2, 'a' * 128]:
             with self.subTest(name=name):
                 result, output, github_env, _ = self.run_script(script, dict(REPO_NAME=name))
                 self.assertEqual((result.returncode, output, github_env), (0, f'IMAGE_NAME={name}\n', ''))
         result, output, _, _ = self.run_script(script, dict(REPO_NAME=''))
         self.assertEqual((result.returncode, output), (0, 'IMAGE_NAME=example\n'))
+        # The fallback is every caller repository name that publishes today.
+        for repository in CALLER_REPOSITORIES:
+            with self.subTest(repository=repository):
+                result, output, _, _ = self.run_script(
+                    script, dict(REPO_NAME='', GITHUB_REPOSITORY='babylonlabs-io/' + repository))
+                self.assertEqual((result.returncode, output), (0, f'IMAGE_NAME={repository}\n'))
 
-    def test_image_name_rejects_hostile_repository_names(self):
+    def test_image_name_rejects_names_the_registries_would_refuse(self):
         script = self.step('prepare-metadata', step_id='set_image_name')['run']
         for name in ('babylond\nMATRIX={"include":[]}', 'babylond\r', 'a\tb', 'a\x1b[0m',
                      # Another namespace, tag or digest smuggled into the reference.
                      'a/b', 'babylonlabs/babylond', '../babylond', 'a:b', 'a:v1', 'a@sha256:' + 'b' * 64,
+                     # Uppercase: Docker Hub and ECR repository names are lowercase, so
+                     # these would only fail once the publication jobs hold credentials.
+                     'A', 'Ab', 'Babylond', 'babylonD', 'BABYLOND', 'Aave-Bots-Svc', 'Vault-Provers',
+                     # Below the two-character minimum both registries enforce.
+                     'a', '1',
+                     # Separator shapes: leading, trailing, doubled ('__' and '--' are
+                     # legal on Docker Hub but not in ECR, so they are not publishable
+                     # to both), and the ECR path separator.
+                     '-x', '_x', '.hidden', '.github', 'a-', 'a.', 'a_', 'a__b', 'a--b', 'a..b', 'a._b',
                      # Shapes the registry or the shell would read as something else.
-                     '-x', '--help', '.github', '.hidden', '_x', 'a b', ' a', 'a ', '*', 'a*', '$(id)',
-                     '`id`', '${HOME}', '"a"', "'a'", 'a;id', 'a|id', 'café', 'a' * 129):
+                     '--help', 'a b', ' a', 'a ', '*', 'a*', '$(id)', '`id`', '${HOME}', '"a"', "'a'",
+                     'a;id', 'a|id', 'café', 'a' * 129):
             with self.subTest(name=name):
                 result, output, github_env, _ = self.run_script(script, dict(REPO_NAME=name))
                 self.assertNotEqual(result.returncode, 0, name)
                 self.assertIn('::error::', result.stdout)
                 self.assertEqual(output + github_env, '')
-        # The fallback is validated too: a repository name the registry rejects
+        # The fallback is validated too: a repository name the registries reject
         # must fail here, not after the credentials exist.
-        result, output, _, _ = self.run_script(script, dict(REPO_NAME='', GITHUB_REPOSITORY='babylonlabs-io/.github'))
-        self.assertNotEqual(result.returncode, 0)
-        self.assertEqual(output, '')
+        for repository in ('.github', 'Babylon', 'a'):
+            with self.subTest(repository=repository):
+                result, output, _, _ = self.run_script(
+                    script, dict(REPO_NAME='', GITHUB_REPOSITORY='babylonlabs-io/' + repository))
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(output, '')
 
     # --- #65: matrix values never reach $GITHUB_ENV ---------------------------
 
