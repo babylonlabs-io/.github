@@ -18,6 +18,16 @@ from test_docker_pipeline_runner_inputs import WORKFLOW, load_workflow
 
 SHA = '0123456789abcdef0123456789abcdef01234567'
 OUT = '${{ needs.prepare-metadata.outputs.%s }}'
+# github.run_id / github.run_attempt of the run under test: GitHub sets them,
+# a caller cannot. Run ids are currently 11 digits and only grow.
+RUN_ID = '12345678901'
+RUN_ATTEMPT = '1'
+RUN_SCOPE = f'-r{RUN_ID}.{RUN_ATTEMPT}'
+# The registry tag limit, the two platform suffixes and what is left for the
+# caller's tag once the run scope and the suffix are appended.
+TAG_LIMIT = 128
+PLATFORM_SUFFIXES = ('-linux-amd64', '-linux-arm64')
+MAX_TAG = TAG_LIMIT - len(RUN_SCOPE) - max(len(suffix) for suffix in PLATFORM_SUFFIXES)
 
 # What callers pass today (gh search code --owner babylonlabs-io, default
 # branches): every explicit imageTag is the commit SHA or a git tag name plus a
@@ -64,6 +74,9 @@ HOSTILE_TAGS = [
     'a' * 117, 'a' * 128, 'a' * 129, 'a' * 4096,
     # Reserved: these are the per-platform tags of "v1".
     'v1-linux-amd64', 'v1-linux-arm64', SHA + '-linux-amd64',
+    # baby-auditor-infra-findings#120: the staging tags of final tag "release".
+    'release-linux-amd64', 'release-linux-arm64',
+    'release' + RUN_SCOPE + '-linux-amd64', 'release' + RUN_SCOPE + '-linux-arm64',
 ]
 
 # (input, expected output). Left column: every distinct value callers pass
@@ -148,25 +161,31 @@ class DockerPipelineTagAndContext(unittest.TestCase):
 
     # --- #121: the image tag is used as given or rejected ----------------------
 
-    def image_tag(self, image_tag='', ref_type='branch', ref_name='main', sha=SHA):
+    def image_tag(self, image_tag='', ref_type='branch', ref_name='main', sha=SHA,
+                  run_id=RUN_ID, run_attempt=RUN_ATTEMPT):
         step = self.step('prepare-metadata', step_id='set_image_tag')
         self.assertEqual(set(step['env']), {'INPUT_IMAGE_TAG', 'REF_TYPE', 'REF_NAME', 'GIT_SHA'})
         return self.run_script(step['run'], dict(INPUT_IMAGE_TAG=image_tag, REF_TYPE=ref_type,
-                                                 REF_NAME=ref_name, GIT_SHA=sha))
+                                                 REF_NAME=ref_name, GIT_SHA=sha,
+                                                 GITHUB_RUN_ID=run_id, GITHUB_RUN_ATTEMPT=run_attempt))
 
-    def accepted_tag(self, **kwargs):
-        """The emitted tag, or None when the value is rejected."""
+    def accepted_outputs(self, **kwargs):
+        """(tag, platform tag prefix), or (None, None) when the value is rejected."""
         result, output, github_env, docker_calls = self.image_tag(**kwargs)
         if result.returncode != 0:
             self.assert_rejected(result, output, github_env, docker_calls)
-            return None
-        match = re.fullmatch(r'IMAGE_TAG=([^\n]*)\n', output)
+            return None, None
+        match = re.fullmatch(r'IMAGE_TAG=([^\n]*)\nPLATFORM_TAG_PREFIX=([^\n]*)\n', output)
         self.assertIsNotNone(match, output)
         self.assertEqual(github_env + docker_calls, '')
-        return match.group(1)
+        return match.group(1), match.group(2)
+
+    def accepted_tag(self, **kwargs):
+        """The emitted tag, or None when the value is rejected."""
+        return self.accepted_outputs(**kwargs)[0]
 
     def test_canonical_tags_are_used_unchanged(self):
-        canonical = CALLER_IMAGE_TAGS + REAL_GIT_TAGS + ['_x', 'A', 'Release-A', '1', 'a' * 116, 'v1-linux-amd64-x',
+        canonical = CALLER_IMAGE_TAGS + REAL_GIT_TAGS + ['_x', 'A', 'Release-A', '1', 'a' * MAX_TAG, 'v1-linux-amd64-x',
                                                           'linux-amd64', 'v1.linux-amd64', 'a..b', 'a--b', 'a.-_']
         for tag in canonical:
             with self.subTest(source='imageTag', tag=tag):
@@ -217,12 +236,38 @@ class DockerPipelineTagAndContext(unittest.TestCase):
         self.assertEqual(self.accepted_tag(image_tag='release-a'), 'release-a')
 
     def test_long_names_are_rejected_not_truncated(self):
-        self.assertEqual(self.accepted_tag(image_tag='a' * 116), 'a' * 116)
-        # 116 + len('-linux-amd64') == 128, the registry limit for the platform tags.
-        self.assertEqual(116 + len('-linux-amd64'), 128)
-        for first, second in (('a' * 117, 'a' * 118), ('a' * 128 + 'x', 'a' * 128 + 'y')):
+        # The grammar caps the tag at 116 = 128 - len('-linux-amd64'); the run
+        # scope of the platform tags takes the rest. Over-long names are
+        # rejected, never shortened into another publication's name.
+        self.assertEqual(116 + len('-linux-amd64'), TAG_LIMIT)
+        self.assertEqual(self.accepted_tag(image_tag='a' * MAX_TAG), 'a' * MAX_TAG)
+        for first, second in (('a' * (MAX_TAG + 1), 'a' * (MAX_TAG + 2)),
+                              ('a' * 117, 'a' * 118), ('a' * 128 + 'x', 'a' * 128 + 'y')):
             self.assertIsNone(self.accepted_tag(image_tag=first))
             self.assertIsNone(self.accepted_tag(image_tag=second))
+
+    def test_platform_tags_always_fit_the_registry_limit(self):
+        # The budget follows the run scope: a longer run id leaves less room,
+        # and what is accepted always fits with the longest platform suffix.
+        for run_id, run_attempt in ((RUN_ID, RUN_ATTEMPT), ('1', '1'), ('9' * 20, '10')):
+            scope = len(f'-r{run_id}.{run_attempt}')
+            longest = TAG_LIMIT - scope - max(len(suffix) for suffix in PLATFORM_SUFFIXES)
+            with self.subTest(run_id=run_id, run_attempt=run_attempt):
+                tag, prefix = self.accepted_outputs(image_tag='a' * longest, run_id=run_id,
+                                                    run_attempt=run_attempt)
+                self.assertEqual(tag, 'a' * longest)
+                for suffix in PLATFORM_SUFFIXES:
+                    self.assertEqual(len(prefix + suffix), TAG_LIMIT)
+                self.assertIsNone(self.accepted_tag(image_tag='a' * (longest + 1), run_id=run_id,
+                                                    run_attempt=run_attempt))
+
+    def test_an_unusable_run_scope_stops_the_build(self):
+        # Without a trustworthy run scope there is no unique staging namespace.
+        for run_id, run_attempt in (('', '1'), (RUN_ID, ''), ('', ''), ('abc', '1'), (RUN_ID, 'x'),
+                                    (RUN_ID + '.1', '1'), (' ' + RUN_ID, '1'), (RUN_ID + '\n1', '1'),
+                                    ('-1', '1'), (RUN_ID, '1 ')):
+            with self.subTest(run_id=run_id, run_attempt=run_attempt):
+                self.assert_rejected(*self.image_tag(image_tag='v1.2.3', run_id=run_id, run_attempt=run_attempt))
 
     def test_hostile_tags_are_rejected(self):
         for tag in HOSTILE_TAGS:
@@ -241,6 +286,88 @@ class DockerPipelineTagAndContext(unittest.TestCase):
         self.assertIn("tag_grammar='^[A-Za-z0-9_][A-Za-z0-9_.-]{0,115}$'", script)
         self.assertIn('LC_ALL=C', script)
 
+    # --- #120: per-platform images live where no caller can name them ----------
+
+    def platform_pairs(self):
+        """The platform_pair values docker_build can really produce: the matrix
+        built by prepare-metadata, run through the real "Prepare" step."""
+        matrix_step = self.step('prepare-metadata', step_id='set_matrix')
+        result, output, _, _ = self.run_script(
+            matrix_step['run'], dict(DISABLE_ARM64='false', RUNS_ON_AMD64='ubuntu-24.04',
+                                     RUNS_ON_ARM64='ubuntu-24.04-arm64'), tools=('jq',))
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        matrix = json.loads(re.search(r'^MATRIX=(.*)$', output, re.M).group(1))
+        prepare = self.step('docker_build', step_id='prepare')
+        pairs = []
+        for entry in matrix['include']:
+            result, output, _, _ = self.run_script(prepare['run'], dict(PLATFORM=entry['platform']))
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            pairs.append(re.fullmatch(r'platform_pair=([^\n]*)\n', output).group(1))
+        return pairs
+
+    def test_every_platform_the_matrix_can_build_is_reserved(self):
+        # A platform the build can push but the validator does not reserve
+        # would be a caller-selectable tag again.
+        pairs = self.platform_pairs()
+        self.assertEqual(pairs, ['linux-amd64', 'linux-arm64'])
+        self.assertEqual(sorted('-' + pair for pair in pairs), sorted(PLATFORM_SUFFIXES))
+        script = self.step('prepare-metadata', step_id='set_image_tag')['run']
+        self.assertIn('PLATFORM_SUFFIXES=(%s)' % ' '.join('-' + pair for pair in pairs), script)
+
+    def test_a_final_tag_can_never_be_another_runs_platform_tag(self):
+        """baby-auditor-infra-findings#120: whatever this workflow accepts as a
+        final tag, the platform tags it then pushes are refused as final tags —
+        from the imageTag input and from a git tag name, in this run and in any
+        other. Platform images therefore cannot take, or be taken by, an
+        advertised release name."""
+        pairs = self.platform_pairs()
+        for tag in ['release', 'v1.2.3', 'latest', SHA] + CALLER_IMAGE_TAGS:
+            accepted, prefix = self.accepted_outputs(image_tag=tag)
+            self.assertEqual(accepted, tag)
+            self.assertEqual(prefix, tag + RUN_SCOPE)
+            for pair in pairs:
+                staging = f'{prefix}-{pair}'
+                with self.subTest(tag=tag, staging=staging):
+                    self.assertLessEqual(len(staging), TAG_LIMIT)
+                    # The finding's own payload: "release-linux-amd64" as a release name.
+                    self.assertIsNone(self.accepted_tag(image_tag=f'{tag}-{pair}'))
+                    self.assertIsNone(self.accepted_tag(ref_type='tag', ref_name=f'{tag}-{pair}'))
+                    # And the run-scoped staging name itself, from either source
+                    # and from any other run.
+                    self.assertIsNone(self.accepted_tag(image_tag=staging))
+                    self.assertIsNone(self.accepted_tag(ref_type='tag', ref_name=staging))
+                    self.assertIsNone(self.accepted_tag(image_tag=staging, run_id='222', run_attempt='3'))
+
+    def test_platform_tags_are_unique_per_run_and_per_tag(self):
+        # Two publications never share a staging tag: the run scope separates
+        # runs and re-runs, the tag separates concurrent calls of one run.
+        seen = {}
+        for tag in ('release', 'release-testnet', 'v1.2.3', 'v1.2.3-r5.1'):
+            for run_id, run_attempt in ((RUN_ID, '1'), (RUN_ID, '2'), ('222', '1')):
+                accepted, prefix = self.accepted_outputs(image_tag=tag, run_id=run_id, run_attempt=run_attempt)
+                self.assertEqual(accepted, tag)
+                self.assertEqual(prefix, f'{tag}-r{run_id}.{run_attempt}')
+                for pair in self.platform_pairs():
+                    staging = f'{prefix}-{pair}'
+                    self.assertNotIn(staging, seen, f'{seen.get(staging)} and {(tag, run_id, run_attempt)} collide')
+                    seen[staging] = (tag, run_id, run_attempt)
+        self.assertEqual(len(seen), 4 * 3 * 2)
+
+    def test_publication_steps_use_only_this_runs_platform_tags(self):
+        for job, step_name in (('docker_build', 'Push to Docker Hub'), ('docker_build', 'Push to ECR'),
+                               ('merge_dockerhub', 'Create manifest list and push'),
+                               ('merge_ecr', 'Create manifest list and push')):
+            step = self.step(job, name=step_name)
+            with self.subTest(job=job, step=step_name):
+                self.assertEqual(step['env']['PLATFORM_TAG_PREFIX'], OUT % 'platform-tag-prefix')
+                self.assertIn('${PLATFORM_TAG_PREFIX}-', step['run'])
+                # The final tag never names a platform image.
+                self.assertNotIn('${IMAGE_TAG}-', step['run'])
+        # The prefix is produced by the credential-free validator, not recomputed.
+        self.assertEqual(self.jobs['prepare-metadata']['outputs']['platform-tag-prefix'],
+                         '${{ steps.set_image_tag.outputs.PLATFORM_TAG_PREFIX }}')
+        self.assertEqual(WORKFLOW.read_text().count('needs.prepare-metadata.outputs.platform-tag-prefix'), 4)
+
     def test_merge_jobs_publish_only_the_validated_tag(self):
         text = WORKFLOW.read_text()
         self.assertEqual(text.count('inputs.imageTag'), 1, 'imageTag is read only by the validation step')
@@ -254,19 +381,24 @@ class DockerPipelineTagAndContext(unittest.TestCase):
             # metadata-action (or anything else) handing back another tag must stop the publication.
             for final in ('release-a', 'feat-a-b', 'latest', ''):
                 with self.subTest(job=job, final=final):
-                    env = {registry_env: registry, 'IMAGE_NAME': 'app', 'IMAGE_TAG': '.release-a', 'BUILD_MATRIX': matrix,
+                    env = {registry_env: registry, 'IMAGE_NAME': 'app', 'IMAGE_TAG': '.release-a',
+                           'PLATFORM_TAG_PREFIX': '.release-a' + RUN_SCOPE, 'BUILD_MATRIX': matrix,
                            'DOCKER_METADATA_OUTPUT_JSON': json.dumps({'tags': [f'{registry}/app:{final}'] if final else []})}
                     result, _, _, docker_calls = self.run_script(step['run'], env, tools=('jq', 'xargs', 'tr', 'echo'))
                     self.assertNotEqual(result.returncode, 0)
                     self.assertEqual(docker_calls, '')
-        # Matching tag: Docker Hub publishes from the two platform tags of that same tag.
+        # Matching tag: Docker Hub publishes the validated tag from the two
+        # platform tags this run pushed, taking the prefix from the real validator.
+        tag, prefix = self.accepted_outputs(image_tag='v1.2.3')
         step = self.step('merge_dockerhub', name='Create manifest list and push')
-        env = dict(DOCKERHUB_REGISTRY='babylonlabs', IMAGE_NAME='app', IMAGE_TAG='v1.2.3', BUILD_MATRIX=matrix,
+        env = dict(DOCKERHUB_REGISTRY='babylonlabs', IMAGE_NAME='app', IMAGE_TAG=tag,
+                   PLATFORM_TAG_PREFIX=prefix, BUILD_MATRIX=matrix,
                    DOCKER_METADATA_OUTPUT_JSON=json.dumps({'tags': ['babylonlabs/app:v1.2.3', 'babylonlabs/app:latest']}))
         result, _, _, docker_calls = self.run_script(step['run'], env, tools=('jq', 'xargs', 'tr', 'echo'))
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(docker_calls.split(), ['buildx', 'imagetools', 'create', '-t', 'babylonlabs/app:v1.2.3',
-                                                'babylonlabs/app:v1.2.3-linux-amd64', 'babylonlabs/app:v1.2.3-linux-arm64'])
+                                                f'babylonlabs/app:v1.2.3{RUN_SCOPE}-linux-amd64',
+                                                f'babylonlabs/app:v1.2.3{RUN_SCOPE}-linux-arm64'])
 
     # --- #119: context and Dockerfile are paths inside the checkout -------------
 

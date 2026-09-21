@@ -19,12 +19,12 @@ on:
       repoName:
         required: false
         type: string
-        description: "Custom repository name"
+        description: "Custom repository name: one registry repository name, ^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$ (no '/', ':' or '@'). Empty = this repository's name."
         default: ""
       imageTag:
         required: false
         type: string
-        description: "Custom image tag. Used as given, never rewritten: must match ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,115}$ and must not end in -linux-amd64 / -linux-arm64. Empty = git tag name on tag events, commit SHA otherwise."
+        description: "Custom image tag. Used as given, never rewritten: must match ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,115}$, must not end in -linux-amd64 / -linux-arm64, and must leave room for the run-scoped platform suffix '-r<run id>.<run attempt>-linux-amd64' within the 128-character registry limit (about 100 characters in practice). Empty = git tag name on tag events, commit SHA otherwise."
         default: ""
       buildArgs:
         type: string
@@ -126,24 +126,40 @@ jobs:
       matrix: ${{ steps.set_matrix.outputs.MATRIX }}
       runner-amd64: ${{ steps.set_matrix.outputs.RUNNER_AMD64 }}
       image-tag: ${{ steps.set_image_tag.outputs.IMAGE_TAG }}
+      platform-tag-prefix: ${{ steps.set_image_tag.outputs.PLATFORM_TAG_PREFIX }}
       docker-context: ${{ steps.set_build_paths.outputs.DOCKER_CONTEXT }}
       dockerfile: ${{ steps.set_build_paths.outputs.DOCKERFILE }}
     steps:
+      # The image name picks the Docker Hub / ECR repository this run publishes
+      # to, so it must be one registry repository name: no "/" (another
+      # namespace), no ":" or "@" (a tag or digest smuggled into the reference)
+      # and nothing the registry would reject after the credentials exist.
       - name: Determine image name
         id: set_image_name
         env:
           REPO_NAME: ${{ inputs.repoName }}
         run: |
+          set -euo pipefail
+          # Byte-wise matching: A-Z must not match locale-specific letters.
+          LC_ALL=C
+          if [ -n "$REPO_NAME" ]; then
+            source="repoName input"
+            image_name="$REPO_NAME"
+          else
+            source="repository name"
+            image_name="${GITHUB_REPOSITORY##*/}"
+          fi
           # A line break in the value would add lines to $GITHUB_OUTPUT.
-          if [[ "$REPO_NAME" == *[[:cntrl:]]* ]]; then
-            echo "::error::repoName contains control characters"
+          if [[ "$image_name" == *[[:cntrl:]]* ]]; then
+            echo "::error::Image name ($source) contains control characters"
             exit 1
           fi
-          if [ -n "$REPO_NAME" ]; then
-            echo "IMAGE_NAME=$REPO_NAME" >> "$GITHUB_OUTPUT"
-          else
-            echo "IMAGE_NAME=$(echo "$GITHUB_REPOSITORY" | cut -d '/' -f 2)" >> "$GITHUB_OUTPUT"
+          name_grammar='^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$'
+          if [[ ! "$image_name" =~ $name_grammar ]]; then
+            echo "::error::Image name '$image_name' ($source) is not a single registry repository name ($name_grammar)"
+            exit 1
           fi
+          echo "IMAGE_NAME=$image_name" >> "$GITHUB_OUTPUT"
 
       # Registry credentials follow the runner label, so callers may only pick
       # from the approved ephemeral GitHub-hosted labels below. Self-hosted
@@ -203,12 +219,21 @@ jobs:
       # become the same tag. The value is therefore used exactly as given or
       # rejected, never rewritten (no "/" -> "-", no stripping, no truncation).
       # Branch names are never used: without imageTag the tag is the git tag
-      # name on tag events and the commit SHA otherwise. 116 = 128 (registry
-      # limit) minus the "-linux-amd64" / "-linux-arm64" platform suffix, and
-      # that suffix is reserved so a release tag cannot name another release's
-      # platform tag. Changing this grammar is a security change: DevOps
-      # review, and extend tests/test_docker_pipeline_tag_context.py.
-      - name: Validate image tag
+      # name on tag events and the commit SHA otherwise.
+      #
+      # The per-platform images are staging artifacts of one run, never
+      # advertised names, so they are published under a namespace no caller can
+      # select: "<tag>-r<run id>.<run attempt>-linux-<arch>". Both halves are
+      # needed. The platform suffixes are reserved here, so no final tag of any
+      # invocation can name a platform tag; the run scope is set by GitHub, not
+      # by the caller, so two invocations never share a staging tag and the
+      # merge jobs can only pick up the platform images this run pushed
+      # (baby-auditor-infra-findings#120). 116 = 128 (registry limit) minus the
+      # longest platform suffix; the run scope is checked against the same
+      # limit below. Changing this grammar or the staging shape is a security
+      # change: DevOps review, and extend
+      # tests/test_docker_pipeline_tag_context.py.
+      - name: Validate image tag and derive the platform tag prefix
         id: set_image_tag
         env:
           INPUT_IMAGE_TAG: ${{ inputs.imageTag }}
@@ -219,6 +244,11 @@ jobs:
           set -euo pipefail
           # Byte-wise matching: A-Z must not match locale-specific letters.
           LC_ALL=C
+          # Every per-platform tag suffix this workflow can push. Keep in step
+          # with the platform_pair case in docker_build's "Prepare" step: a
+          # platform that is not reserved here is a caller-selectable tag.
+          PLATFORM_SUFFIXES=(-linux-amd64 -linux-arm64)
+          TAG_LIMIT=128
           if [ -n "$INPUT_IMAGE_TAG" ]; then
             source="imageTag input"
             tag="$INPUT_IMAGE_TAG"
@@ -238,13 +268,33 @@ jobs:
             echo "::error::Image tag '$tag' ($source) is not a canonical registry tag ($tag_grammar). It is not rewritten, because two different names could become the same tag; pass an imageTag that already matches."
             exit 1
           fi
-          case "$tag" in
-            *-linux-amd64|*-linux-arm64)
-              echo "::error::Image tag '$tag' ($source) ends in a platform suffix reserved for this workflow's per-platform tags"
+          suffix_width=0
+          for suffix in "${PLATFORM_SUFFIXES[@]}"; do
+            if [[ "$tag" == *"$suffix" ]]; then
+              echo "::error::Image tag '$tag' ($source) ends in '$suffix', a suffix reserved for this workflow's per-platform staging tags"
               exit 1
-              ;;
-          esac
-          echo "IMAGE_TAG=$tag" >> "$GITHUB_OUTPUT"
+            fi
+            if [ "${#suffix}" -gt "$suffix_width" ]; then
+              suffix_width="${#suffix}"
+            fi
+          done
+          # Set by GitHub, never by the caller: it is what makes the staging
+          # tags of two publications distinct.
+          run_scope="${GITHUB_RUN_ID-}.${GITHUB_RUN_ATTEMPT-}"
+          run_scope_grammar='^[0-9]+\.[0-9]+$'
+          if [[ ! "$run_scope" =~ $run_scope_grammar ]]; then
+            echo "::error::GITHUB_RUN_ID / GITHUB_RUN_ATTEMPT are not usable ('$run_scope')"
+            exit 1
+          fi
+          platform_tag_prefix="$tag-r$run_scope"
+          if [ "$(( ${#platform_tag_prefix} + suffix_width ))" -gt "$TAG_LIMIT" ]; then
+            echo "::error::Image tag '$tag' ($source) leaves no room for the run-scoped platform suffix: $(( ${#platform_tag_prefix} + suffix_width )) > $TAG_LIMIT characters. Pass a shorter imageTag."
+            exit 1
+          fi
+          {
+            echo "IMAGE_TAG=$tag"
+            echo "PLATFORM_TAG_PREFIX=$platform_tag_prefix"
+          } >> "$GITHUB_OUTPUT"
 
       # Every platform leg must build the commit that was checked out, so the
       # build context and the Dockerfile have to be paths inside the checkout.
@@ -777,19 +827,26 @@ jobs:
         run: |
           aws ecr get-login-password --region "$AWS_ECR_REGION" | docker login --username AWS --password-stdin "$AWS_ECR_REGISTRY_ID"
 
+      # The per-platform image is a staging artifact of this run: it is pushed
+      # under the run-scoped, platform-suffixed name derived in
+      # prepare-metadata, which no caller can select as a final tag, so it can
+      # neither overwrite nor be overwritten by another publication's
+      # advertised tag (baby-auditor-infra-findings#120).
       - name: Push to Docker Hub
         if: inputs.publish && inputs.push_to_dockerhub
         env:
           DOCKERHUB_REGISTRY: ${{ vars.DOCKERHUB_REGISTRY_ID || 'babylonlabs' }}
           IMAGE_NAME: ${{ needs.prepare-metadata.outputs.image-name }}
           BUILD_PREFIX: ${{ inputs.buildArtifactPrefix }}
-          IMAGE_TAG: ${{ needs.prepare-metadata.outputs.image-tag }}
+          PLATFORM_TAG_PREFIX: ${{ needs.prepare-metadata.outputs.platform-tag-prefix }}
           PLATFORM_PAIR: ${{ steps.prepare.outputs.platform_pair }}
           GIT_SHA: ${{ github.sha }}
         run: |
+          set -euo pipefail
           REPO="${DOCKERHUB_REGISTRY}/${IMAGE_NAME}"
-          docker tag "local-scan:${BUILD_PREFIX}${GIT_SHA}" "$REPO:${IMAGE_TAG}-${PLATFORM_PAIR}"
-          docker push "$REPO:${IMAGE_TAG}-${PLATFORM_PAIR}"
+          TAG="${PLATFORM_TAG_PREFIX}-${PLATFORM_PAIR}"
+          docker tag "local-scan:${BUILD_PREFIX}${GIT_SHA}" "$REPO:$TAG"
+          docker push "$REPO:$TAG"
 
       - name: Push to ECR
         if: inputs.publish && inputs.push_to_ecr
@@ -797,12 +854,12 @@ jobs:
           AWS_ECR_REGISTRY_ID: ${{ vars.AWS_ECR_REGISTRY_ID }}
           IMAGE_NAME: ${{ needs.prepare-metadata.outputs.image-name }}
           BUILD_PREFIX: ${{ inputs.buildArtifactPrefix }}
-          IMAGE_TAG: ${{ needs.prepare-metadata.outputs.image-tag }}
+          PLATFORM_TAG_PREFIX: ${{ needs.prepare-metadata.outputs.platform-tag-prefix }}
           PLATFORM_PAIR: ${{ steps.prepare.outputs.platform_pair }}
           GIT_SHA: ${{ github.sha }}
         run: |
           REPO="${AWS_ECR_REGISTRY_ID}/${IMAGE_NAME}"
-          TAG="${IMAGE_TAG}-${PLATFORM_PAIR}"
+          TAG="${PLATFORM_TAG_PREFIX}-${PLATFORM_PAIR}"
           # An existing immutable tag is not evidence that this build published it.
           # BatchGetImage is already permitted by gha-ecr-push; API errors must fail.
           result=$(aws ecr batch-get-image --repository-name "$IMAGE_NAME" --image-ids "imageTag=$TAG" --output json)
@@ -912,6 +969,7 @@ jobs:
           IMAGE_NAME: ${{ needs.prepare-metadata.outputs.image-name }}
           BUILD_MATRIX: ${{ needs.prepare-metadata.outputs.matrix }}
           IMAGE_TAG: ${{ needs.prepare-metadata.outputs.image-tag }}
+          PLATFORM_TAG_PREFIX: ${{ needs.prepare-metadata.outputs.platform-tag-prefix }}
         run: |
           first_tag=$(jq -r '.tags[0] // empty' <<< "$DOCKER_METADATA_OUTPUT_JSON")
           if [ -z "$first_tag" ]; then
@@ -923,7 +981,9 @@ jobs:
             echo "::error::Final tag '$first_tag' does not carry the validated tag '$IMAGE_TAG'. Refusing to publish."
             exit 1
           fi
-          source_tags=$(echo "$BUILD_MATRIX" | jq -r '.include[].platform | gsub("/"; "-")' | xargs -I{} echo "$REPO:${IMAGE_TAG}-{}" | tr '\n' ' ')
+          # Sources are this run's staging tags (run-scoped, platform-suffixed),
+          # never a name another publication could have written.
+          source_tags=$(echo "$BUILD_MATRIX" | jq -r '.include[].platform | gsub("/"; "-")' | xargs -I{} echo "$REPO:${PLATFORM_TAG_PREFIX}-{}" | tr '\n' ' ')
           docker buildx imagetools create -t "$first_tag" $source_tags
 
       - name: Inspect image
@@ -1033,6 +1093,7 @@ jobs:
           IMAGE_NAME: ${{ needs.prepare-metadata.outputs.image-name }}
           BUILD_MATRIX: ${{ needs.prepare-metadata.outputs.matrix }}
           IMAGE_TAG: ${{ needs.prepare-metadata.outputs.image-tag }}
+          PLATFORM_TAG_PREFIX: ${{ needs.prepare-metadata.outputs.platform-tag-prefix }}
         run: |
           first_tag=$(jq -r '.tags[0] // empty' <<< "$DOCKER_METADATA_OUTPUT_JSON")
           if [ -z "$first_tag" ]; then
@@ -1044,7 +1105,9 @@ jobs:
             echo "::error::Final tag '$first_tag' does not carry the validated tag '$IMAGE_TAG'. Refusing to publish."
             exit 1
           fi
-          source_tags=$(echo "$BUILD_MATRIX" | jq -r '.include[].platform | gsub("/"; "-")' | xargs -I{} echo "$REPO:${IMAGE_TAG}-{}" | tr '\n' ' ')
+          # Sources are this run's staging tags (run-scoped, platform-suffixed),
+          # never a name another publication could have written.
+          source_tags=$(echo "$BUILD_MATRIX" | jq -r '.include[].platform | gsub("/"; "-")' | xargs -I{} echo "$REPO:${PLATFORM_TAG_PREFIX}-{}" | tr '\n' ' ')
           TAG="${first_tag##*:}"
           # An existing immutable tag is not evidence that this build published it.
           # BatchGetImage is already permitted by gha-ecr-push; API errors must fail.

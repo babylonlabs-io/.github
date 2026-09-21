@@ -41,6 +41,9 @@ class ECRTagCollisions(unittest.TestCase):
                        AWS_RESPONSE=response, AWS_EXIT=str(aws_exit), DOCKER_EXIT=str(docker_exit),
                        AWS_ECR_REGISTRY_ID='123456789012.dkr.ecr.ap-east-1.amazonaws.com',
                        IMAGE_NAME='victim', IMAGE_TAG='release', PLATFORM_PAIR='linux-amd64',
+                       # The run-scoped staging prefix prepare-metadata derives
+                       # for final tag "release" (baby-auditor-infra-findings#120).
+                       PLATFORM_TAG_PREFIX='release-r12345678901.1',
                        BUILD_PREFIX='', GIT_SHA='a' * 40,
                        BUILD_MATRIX=json.dumps({'include': [{'platform': 'linux/amd64'}, {'platform': 'linux/arm64'}]}),
                        DOCKER_METADATA_OUTPUT_JSON=json.dumps({'tags': ['123456789012.dkr.ecr.ap-east-1.amazonaws.com/victim:release']}))
@@ -55,7 +58,7 @@ class ECRTagCollisions(unittest.TestCase):
 
     def test_platform_and_manifest_publication(self):
         for job, step_name, tag, expected_push in [
-            ('docker_build', 'Push to ECR', 'release-linux-amd64', 'push '),
+            ('docker_build', 'Push to ECR', 'release-r12345678901.1-linux-amd64', 'push '),
             ('merge_ecr', 'Create manifest list and push', 'release', 'buildx imagetools create '),
         ]:
             missing = {'images': [], 'failures': [{'failureCode': 'ImageNotFound', 'imageId': {'imageTag': tag}}]}

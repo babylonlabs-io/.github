@@ -138,17 +138,36 @@ class DockerPipelineRunnerInputs(unittest.TestCase):
         self.assertNotIn('MATRIX={', script)
         self.assertNotRegex(script, r'\\"runner\\"')
 
-    def test_image_name_rejects_control_characters(self):
+    def test_image_name_accepts_the_names_callers_pass(self):
         script = self.step('prepare-metadata', step_id='set_image_name')['run']
-        result, output, _, _ = self.run_script(script, dict(REPO_NAME='babylond'))
-        self.assertEqual((result.returncode, output), (0, 'IMAGE_NAME=babylond\n'))
-        result, output, _, _ = self.run_script(script, dict(REPO_NAME=''))
-        self.assertEqual((result.returncode, output), (0, 'IMAGE_NAME=example\n'))
-        for name in ('babylond\nMATRIX={"include":[]}', 'babylond\r', 'a\tb'):
+        # Every repoName passed by a caller today, plus the fallback.
+        for name in ('babylond', 'vault-provers', 'vault-provers-bsn', 'babylon-desk-bridge',
+                     'babylon-desk-discord-adapter', 'aave-bots-indexer', 'aave-bots-svc',
+                     'a', 'A', '1', 'a_b', 'a.b', 'a' * 128):
             with self.subTest(name=name):
                 result, output, github_env, _ = self.run_script(script, dict(REPO_NAME=name))
-                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual((result.returncode, output, github_env), (0, f'IMAGE_NAME={name}\n', ''))
+        result, output, _, _ = self.run_script(script, dict(REPO_NAME=''))
+        self.assertEqual((result.returncode, output), (0, 'IMAGE_NAME=example\n'))
+
+    def test_image_name_rejects_hostile_repository_names(self):
+        script = self.step('prepare-metadata', step_id='set_image_name')['run']
+        for name in ('babylond\nMATRIX={"include":[]}', 'babylond\r', 'a\tb', 'a\x1b[0m',
+                     # Another namespace, tag or digest smuggled into the reference.
+                     'a/b', 'babylonlabs/babylond', '../babylond', 'a:b', 'a:v1', 'a@sha256:' + 'b' * 64,
+                     # Shapes the registry or the shell would read as something else.
+                     '-x', '--help', '.github', '.hidden', '_x', 'a b', ' a', 'a ', '*', 'a*', '$(id)',
+                     '`id`', '${HOME}', '"a"', "'a'", 'a;id', 'a|id', 'café', 'a' * 129):
+            with self.subTest(name=name):
+                result, output, github_env, _ = self.run_script(script, dict(REPO_NAME=name))
+                self.assertNotEqual(result.returncode, 0, name)
+                self.assertIn('::error::', result.stdout)
                 self.assertEqual(output + github_env, '')
+        # The fallback is validated too: a repository name the registry rejects
+        # must fail here, not after the credentials exist.
+        result, output, _, _ = self.run_script(script, dict(REPO_NAME='', GITHUB_REPOSITORY='babylonlabs-io/.github'))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(output, '')
 
     # --- #65: matrix values never reach $GITHUB_ENV ---------------------------
 

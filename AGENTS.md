@@ -269,10 +269,14 @@ When editing the Docker pipeline, also run `python3 -m unittest discover -s test
 (Python 3, `yq` v4, `jq`). Runner labels for `reusable_docker_pipeline.yml` are an
 approved list in its `prepare-metadata` job — see "Never run credentialed Docker
 jobs on a caller-chosen runner label" in `SECURITY-GUARDRAILS.md` before touching
-`runs-on:`, the matrix, `$GITHUB_ENV` writes, or registry logins. `imageTag`,
-`dockerContext` and `dockerfile` are validated in the same job and never rewritten or
-re-read downstream — see "Never rewrite an image tag or build from outside the
-checkout". Preserve the fail-closed tag lookup and immutable-tag
+`runs-on:`, the matrix, `$GITHUB_ENV` writes, or registry logins. `repoName`,
+`imageTag`, `dockerContext` and `dockerfile` are validated in the same job and never
+rewritten or re-read downstream — see "Never rewrite an image tag or build from
+outside the checkout". The per-platform images are pushed under that job's
+`platform-tag-prefix` output (`<tag>-r<run id>.<run attempt>-linux-<arch>`), never
+under the final tag — see "Never publish a per-platform image under a name a caller
+can select" before touching the push or merge steps or adding a matrix platform.
+Preserve the fail-closed tag lookup and immutable-tag
 collision rules in `SECURITY-GUARDRAILS.md`; rerun success needs verification of
 expected build content, not just a tag-existence check.
 
