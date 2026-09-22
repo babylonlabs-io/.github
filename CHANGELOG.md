@@ -1,6 +1,9 @@
 # CHANGELOG
 
 ## Unreleased
+- reusable_docker_pipeline: **breaking** — per-platform images are published as `<tag>-r<run id>.<run attempt>-linux-<arch>` instead of `<tag>-linux-<arch>` (baby-auditor-infra-findings#120). The platform tags shared a namespace with the advertised tags, so one publication's staging image could take another's release name. The prefix is derived in `prepare-metadata` and passed on as the `platform-tag-prefix` output; the push and merge jobs never build a platform reference from the final tag. Migration: pull the multi-platform tag, not a `-linux-amd64` / `-linux-arm64` name; `imageTag` must now also leave room for the run-scoped suffix within the 128-character registry limit (about 100 characters).
+- reusable_docker_pipeline: **breaking** — `repoName` must be a single lowercase registry repository name, `^[a-z0-9]+([._-][a-z0-9]+)*$`, 2-128 characters (no `/`, `:`, `@`, uppercase, or doubled/leading/trailing separators); the fallback repository name is validated the same way. This is the intersection of the Docker Hub and ECR naming rules, so an invalid name now fails in `prepare-metadata` instead of after credentials are bound. All 13 `repoName` values passed by the 41 calling repositories already match.
+- Scope: the merge jobs still reference the platform images by tag rather than by the digests recorded during the run (#47).
 
 ## 0.22.0
 - release: v0.22.0 ships the image-identity and credential-isolation work below (baby-auditor-infra-findings #14, #55, #61, #65, #119, #121). Verified before tagging with a `publish: false` run of the `devops-test` caller pinned to `d34926c` (https://github.com/babylonlabs-io/devops-test/actions/runs/35542512042): `prepare-metadata` validation, the job-scoped Docker config, the context/Dockerfile confinement step and the always-on credential cleanup all ran. The `merge_ecr` / `merge_dockerhub` jobs were not exercised, since that run does not publish.
