@@ -1,0 +1,79 @@
+name: Audit Workflows (zizmor)
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+  workflow_call:
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  zizmor:
+    name: zizmor
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    env:
+      # Upstream release image, pinned by digest. The digest is the one
+      # zizmor-action v0.6.4 ships for 1.30.1 and matches the registry tag
+      # (verified 2026-09-22). Bump the tag and the digest together.
+      ZIZMOR_IMAGE: ghcr.io/zizmorcore/zizmor:1.30.1@sha256:a2eb396d886c053073405c7a980f2139ba2248ec172243cfa3841e57196e8101
+    steps:
+      - name: Checkout calling repo
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2 https://github.com/actions/checkout/releases/tag/v6.0.2
+        with:
+          persist-credentials: false
+
+      # Audits every workflow, composite action and Dependabot config in the
+      # calling repo: template injection, dangerous triggers, excessive
+      # permissions, unpinned actions and images, cache poisoning, leaked
+      # credentials, known-vulnerable actions. Findings at or above medium
+      # severity and medium confidence fail the check. Accepted findings are
+      # ignored per repo in .github/zizmor.yml, which zizmor picks up on its
+      # own and which goes through normal code-owner review.
+      # GH_TOKEN (read-only on pull_request) is only used by the online audits
+      # (known-vulnerable-actions, impostor-commit, typosquat-uses).
+      - name: Audit GitHub Actions workflows with zizmor
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -uo pipefail
+
+          echo "::group::Pull zizmor image"
+          docker pull "${ZIZMOR_IMAGE}" || { echo "::error::could not pull ${ZIZMOR_IMAGE}"; exit 1; }
+          echo "::endgroup::"
+
+          docker run --rm \
+            --volume "${GITHUB_WORKSPACE}:/workspace:ro" \
+            --workdir /workspace \
+            --env GH_TOKEN \
+            "${ZIZMOR_IMAGE}" \
+            --persona regular \
+            --min-severity medium \
+            --min-confidence medium \
+            --format github \
+            -- .
+          rc=$?
+
+          case "${rc}" in
+            0)
+              echo "zizmor: no findings at or above medium severity and medium confidence"
+              ;;
+            3)
+              echo "::warning::zizmor found nothing to audit in this repository (no workflows, actions or dependabot config); passing"
+              ;;
+            1[0-4])
+              echo "::error::zizmor reported findings (exit code ${rc}). Fix them, or add a reviewed ignore for accepted findings to .github/zizmor.yml"
+              exit "${rc}"
+              ;;
+            *)
+              echo "::error::zizmor did not complete (exit code ${rc})"
+              exit 1
+              ;;
+          esac

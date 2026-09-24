@@ -35,12 +35,14 @@ supply-chain change.** Rules below derive from real fixes here (PRs #56, #67, #7
     reusable_backport.yml               # uses pull_request_target — see rules
     reusable_changelog_reminder.yml
     reusable_check_pinned_actions.yml   # the SHA-pin enforcer; do NOT weaken
+    reusable_ci_doctor.yml              # ci-doctor hygiene gate (job timeouts, concurrency, parse errors); org required check
     reusable_docker_pipeline.yml        # build + Trivy + Hadolint + push (OIDC)
     test_ecr_tag_collisions.yml          # PR regression tests (tests/): ECR publication, runner inputs, image tag / build context validation, Docker credential cleanup
     reusable_github_release.yml
     reusable_go_lint_test.yml
     reusable_go_releaser.yml
     reusable_sync_branch.yml
+    reusable_zizmor.yml                 # zizmor security audit of the calling repo workflows; org required check
 CHANGELOG.md                            # update on every functional change
 ```
 
