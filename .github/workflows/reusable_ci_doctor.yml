@@ -8,8 +8,12 @@ on:
 
 permissions: {}
 
+# One group per audit, caller workflow and ref: a new push cancels only the
+# superseded run of this same audit. Inside a called workflow github.workflow
+# is the caller's name, so the literal keeps this group distinct from the
+# caller's own group and from the other audit workflow.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-ci-doctor-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -67,9 +71,13 @@ jobs:
             exit 0
           fi
           node "${tools}/bin/ci-doctor.js" --only="${ADVISORY_RULES}" --json . > "${tools}/advisory.json"
+          if ! jq -e '.findings | type == "array"' "${tools}/advisory.json" > /dev/null 2>&1; then
+            echo "::notice::ci-doctor produced no advisory report"
+            exit 0
+          fi
           jq -r '.findings[] | select(.ruleId != "parse-error")
                  | "::warning file=\(.filename),line=\(.line),col=\(.column),title=ci-doctor \(.ruleId)::\(.message | gsub("%";"%25") | gsub("\r";"%0D") | gsub("\n";"%0A"))"' \
-            "${tools}/advisory.json" || echo "::notice::ci-doctor advisory output could not be parsed"
+            "${tools}/advisory.json"
           exit 0
 
       - name: Gate - job timeouts, concurrency groups, parse errors
@@ -84,14 +92,24 @@ jobs:
           node "${tools}/bin/ci-doctor.js" --only="${GATE_RULES}" --json . > "${tools}/gate.json"
           rc=$?
           set -e
-          if [ "${rc}" -eq 2 ]; then
-            echo "::error::ci-doctor did not complete (internal error)"
+          # ci-doctor exits 0 (no error-level findings) or 1 (error-level findings,
+          # i.e. parse errors) after writing its report. Any other exit code, or a
+          # report without a findings array, means the audit did not complete:
+          # fail closed instead of reporting a clean run.
+          case "${rc}" in
+            0|1) ;;
+            *)
+              echo "::error::ci-doctor did not complete (exit code ${rc})"
+              exit 1
+              ;;
+          esac
+          if ! count=$(jq -e '.findings | if type == "array" then length else error("no findings array") end' "${tools}/gate.json" 2>/dev/null); then
+            echo "::error::ci-doctor did not produce a valid findings report (exit code ${rc})"
             exit 1
           fi
           jq -r '.findings[]
                  | "::error file=\(.filename),line=\(.line),col=\(.column),title=ci-doctor \(.ruleId)::\(.message | gsub("%";"%25") | gsub("\r";"%0D") | gsub("\n";"%0A"))"' \
             "${tools}/gate.json"
-          count=$(jq '.findings | length' "${tools}/gate.json")
           if [ "${count}" -gt 0 ]; then
             echo "::error::ci-doctor: ${count} blocking finding(s). Add timeout-minutes to every job, a concurrency block to workflows triggered by push or pull_request, and fix YAML parse errors."
             exit 1

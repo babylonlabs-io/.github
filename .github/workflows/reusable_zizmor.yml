@@ -8,8 +8,12 @@ on:
 
 permissions: {}
 
+# One group per audit, caller workflow and ref: a new push cancels only the
+# superseded run of this same audit. Inside a called workflow github.workflow
+# is the caller's name, so the literal keeps this group distinct from the
+# caller's own group and from the other audit workflow.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-zizmor-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
