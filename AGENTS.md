@@ -121,8 +121,9 @@ job-level grants meaningful.
 Today's references:
 
 - `secrets.GITHUB_TOKEN` — scope governed by `permissions:`.
-- `secrets.DOCKERHUB_{USERNAME,TOKEN}` — push in docker pipeline; pull-rate raise
-  in `reusable_go_lint_test.yml`.
+- `secrets.DOCKERHUB_{USERNAME,TOKEN}` — push in docker pipeline only. (The
+  go lint/test login that could never run is removed; don't reintroduce it with
+  this push pair: authenticated pulls need a pull-only token as a named secret.)
 - `vars.TBV_DEPS_APP_ID` + `secrets.TBV_DEPS_APP_PRIVATE_KEY` — the GitHub App
   `tbv-protocol-deps-ro` (Contents: read). `reusable_docker_pipeline.yml` mints a
   per-job installation token from them (`actions/create-github-app-token`,
@@ -176,9 +177,23 @@ inside a `run:` step is on the step's own `if:` expression.
 - `push` — avoid; downstream consumes these as reusable workflows.
 - `workflow_dispatch` — fine for ops; document inputs.
 
-When touching a `pull_request`/`push` workflow, add `concurrency:` keyed on
-`${{ github.workflow }}-${{ github.ref }}` with `cancel-in-progress: true` on
-non-default branches. Not all have it — add when touching.
+Every `pull_request`/`push` workflow has a top-level `concurrency:` block.
+Reusable checks use
+`${{ github.workflow_ref }}-<workflow>-${{ github.event.pull_request.number || github.run_id }}`
+with `cancel-in-progress: true`: runs for the same PR (`pull_request` or
+`pull_request_target`, both carry the PR) share a group, and every other run
+(push, merge queue) gets its own, because a group keeps one running and one
+pending run and a newer run replaces the pending one whatever
+`cancel-in-progress` says. Don't use this key where every event must run to
+completion (backport's `closed` and `labeled`): a later event for the same PR
+cancels the earlier run. Inside a called workflow
+`github.workflow` and `github.workflow_ref` are the caller's, so the literal keeps
+a reusable check out of its caller's group, and keying on the file (not the
+display name) keeps a same-named run out of it. Non-reusable workflows may use a
+fixed name (`test_ecr_tag_collisions.yml`). Every job sets
+`timeout-minutes`; reusable workflows with long jobs take a `timeout_minutes`
+input instead (docker pipeline, go lint/test, goreleaser). This is a
+convention until the ci-doctor required check (#94) lands and enforces it.
 
 ## Commit signatures
 

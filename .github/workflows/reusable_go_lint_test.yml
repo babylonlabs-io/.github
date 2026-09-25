@@ -27,8 +27,10 @@ on:
         description: 'Run integration tests'
         type: boolean
         default: false
+      # No effect. The Docker Hub login it was meant to enable never ran and is
+      # removed (see CHANGELOG); kept so callers that set it keep working.
       integration-tests-docker-auth:
-        description: 'Authenticate with Docker on integration tests'
+        description: 'No effect (the Docker Hub login it enabled never ran and was removed); kept for existing callers'
         type: boolean
         default: false
       # allow customizing the test command (e.g sudo make test-e2e)
@@ -72,6 +74,11 @@ on:
         required: false
         type: string
         default: testdata.json
+      timeout_minutes:
+        description: 'Job timeout in minutes, for every job (like reusable_docker_pipeline). Raise it for unusually long test suites.'
+        required: false
+        type: number
+        default: 60
 
 permissions: {}
 
@@ -80,6 +87,7 @@ jobs:
     permissions:
       contents: read
     runs-on: ubuntu-24.04
+    timeout-minutes: ${{ inputs.timeout_minutes }}
     if: ${{ inputs.run-build }}
     steps:
       - name: Checkout repository
@@ -138,6 +146,7 @@ jobs:
     permissions:
       contents: read
     runs-on: ubuntu-24.04
+    timeout-minutes: ${{ inputs.timeout_minutes }}
     if: ${{ inputs.run-lint }}
     steps:
       - name: Checkout repository
@@ -185,6 +194,7 @@ jobs:
     permissions:
       contents: read
     runs-on: ubuntu-24.04
+    timeout-minutes: ${{ inputs.timeout_minutes }}
     if: ${{ inputs.run-unit-tests }}
 
     steps:
@@ -251,17 +261,11 @@ jobs:
     permissions:
       contents: read
     runs-on: ubuntu-24.04
+    timeout-minutes: ${{ inputs.timeout_minutes }}
     if: ${{ inputs.run-integration-tests }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2 https://github.com/actions/checkout/releases/tag/v6.0.2
-      - name: Login to Docker Hub
-        if: ${{ inputs.integration-tests-docker-auth == 'true' }}
-        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0 https://github.com/docker/login-action/releases/tag/v3.7.0
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
       - name: Set up Go
         uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0 https://github.com/actions/setup-go/releases/tag/v5.6.0
         with:
@@ -304,6 +308,7 @@ jobs:
     permissions:
       contents: read
     runs-on: ubuntu-24.04
+    timeout-minutes: ${{ inputs.timeout_minutes }}
     if: ${{ inputs.run-check-mock-gen }}
     steps:
       - name: Checkout repository
@@ -332,6 +337,7 @@ jobs:
     permissions:
       contents: read
     runs-on: ubuntu-24.04
+    timeout-minutes: ${{ inputs.timeout_minutes }}
     if: ${{ inputs.run-gosec }}
     steps:
       - name: Checkout repository

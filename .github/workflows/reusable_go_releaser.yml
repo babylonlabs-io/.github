@@ -8,6 +8,11 @@ on:
         description: 'Run releaser'
         type: boolean
         default: true
+      timeout_minutes:
+        description: 'Job timeout in minutes, like reusable_docker_pipeline. Raise it for unusually long builds.'
+        required: false
+        type: number
+        default: 60
 
 permissions:
   contents: write
@@ -16,6 +21,7 @@ jobs:
   goreleaser:
     name: Go Releaser
     runs-on: ubuntu-24.04
+    timeout-minutes: ${{ inputs.timeout_minutes }}
     if: ${{ inputs.run-releaser }}
     steps:
       - name: Checkout
