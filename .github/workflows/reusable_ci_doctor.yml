@@ -1,0 +1,170 @@
+name: Audit Workflow Hygiene (ci-doctor)
+
+on:
+  pull_request:
+    # edited: a PR moved to another base branch gets a new merge commit, so
+    # it is audited again. Title and body edits re-run it too; don't filter
+    # them out with `if:`, a skipped run reports success.
+    types: [opened, synchronize, reopened, edited]
+
+  merge_group:
+
+  workflow_call:
+
+permissions: {}
+
+# Only runs of the same PR share a group, so a new push to a PR cancels that
+# PR's superseded run. Every other run (push, merge queue) gets a group of its
+# own and is never cancelled or replaced: a group holds one running and one
+# pending run, and a newer run replaces the pending one whatever
+# cancel-in-progress says. Keyed on the workflow file (github.workflow_ref), not
+# the display name, so a same-named run never shares the group; the literal
+# keeps the two audits called from one caller apart.
+concurrency:
+  group: ${{ github.workflow_ref }}-ci-doctor-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  ci-doctor:
+    name: ci-doctor
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    env:
+      # ci-doctor has no release image; it is an npm package. The exact
+      # tarballs (package + its single runtime dependency) are pinned by
+      # version and SHA-256 (computed 2026-09-22) and unpacked without running
+      # any install scripts. Bump versions and hashes together.
+      CI_DOCTOR_VERSION: "0.5.1"
+      CI_DOCTOR_SHA256: 856e2dc845156c1a1a249ddb094bf85e6d6d363062cc76ac7b7f05f543524776
+      YAML_VERSION: "2.9.1"
+      YAML_SHA256: 4ef6c54cf559b8a207b7b518378230805a1c84af239b14960e8c67c7d59de5d3
+      # Blocking rules: not covered by zizmor and always fixable inside the PR
+      # (add timeout-minutes to the job / a concurrency block to the workflow).
+      # YAML parse errors block as well: GitHub cannot run such a workflow.
+      GATE_RULES: missing-timeout,missing-concurrency
+      # Advisory rules: cost, reliability and image-pinning hygiene,
+      # annotations only. docker-no-pin stays advisory because nothing else
+      # checks image pinning: reusable_check_pinned_actions reads only `uses:`
+      # lines containing "@", and zizmor at the regular persona does not flag
+      # tag-pinned container, services or docker:// images.
+      # Excluded on purpose: pinned-action-sha and missing-permissions
+      # (enforced by reusable_check_pinned_actions and zizmor) and
+      # deprecated-action (stale hard-coded version table, false positives).
+      ADVISORY_RULES: missing-cache,wide-trigger,expensive-runner,artifact-no-retention,fetch-depth-zero,matrix-overcommit,stale-cache-key,fail-fast-true,always-run-on-pr,service-no-healthcheck,docker-no-pin
+    steps:
+      - name: Checkout calling repo
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2 https://github.com/actions/checkout/releases/tag/v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Fetch ci-doctor (pinned version, verified tarball hashes)
+        run: |
+          set -euo pipefail
+          tools="${RUNNER_TEMP}/ci-doctor"
+          mkdir -p "${tools}/node_modules/yaml"
+          curl -fsSL --retry 3 -o "${tools}/ci-doctor.tgz" \
+            "https://registry.npmjs.org/ci-doctor/-/ci-doctor-${CI_DOCTOR_VERSION}.tgz"
+          curl -fsSL --retry 3 -o "${tools}/yaml.tgz" \
+            "https://registry.npmjs.org/yaml/-/yaml-${YAML_VERSION}.tgz"
+          echo "${CI_DOCTOR_SHA256}  ${tools}/ci-doctor.tgz" | sha256sum --check --strict -
+          echo "${YAML_SHA256}  ${tools}/yaml.tgz" | sha256sum --check --strict -
+          tar -xzf "${tools}/ci-doctor.tgz" -C "${tools}" --strip-components=1
+          tar -xzf "${tools}/yaml.tgz" -C "${tools}/node_modules/yaml" --strip-components=1
+          echo "ci-doctor $(node "${tools}/bin/ci-doctor.js" --version) on node $(node --version)"
+
+      # --only accepts any name: an unknown or renamed rule ID runs nothing
+      # and reports nothing, which the gate would read as clean. So the gate
+      # rules first run over a fixed fixture, where each must fire exactly
+      # once (a job that calls a reusable workflow cannot take
+      # timeout-minutes and must not be flagged) and a YAML parse error in a
+      # .yaml file must still be reported (so .yaml workflows are still read).
+      # When a version bump or a GATE_RULES edit breaks this, fix the rule IDs
+      # or extend the fixture.
+      - name: Self-test - the gate rules fire on a known-bad fixture
+        run: |
+          set -euo pipefail
+          tools="${RUNNER_TEMP}/ci-doctor"
+          fixture="${RUNNER_TEMP}/ci-doctor-fixture"
+          mkdir -p "${fixture}/.github/workflows"
+          printf '%s\n' \
+            'on: pull_request' \
+            'jobs:' \
+            '  plain:' \
+            '    runs-on: ubuntu-24.04' \
+            '    steps:' \
+            '      - run: echo' \
+            '  called:' \
+            '    uses: ./.github/workflows/called.yml' \
+            > "${fixture}/.github/workflows/rules.yml"
+          printf 'jobs: [\n' > "${fixture}/.github/workflows/broken.yaml"
+          rc=0
+          node "${tools}/bin/ci-doctor.js" --only="${GATE_RULES}" --json "${fixture}" > "${tools}/self-test.json" || rc=$?
+          if ! jq -e --arg rules "${GATE_RULES}" '
+                ([.findings[].ruleId | select(. != "parse-error")] | sort) == ($rules | split(",") | sort)
+                and any(.findings[]; .ruleId == "parse-error" and .filename == ".github/workflows/broken.yaml")' \
+                "${tools}/self-test.json" > /dev/null 2>&1; then
+            echo "::error::ci-doctor ${CI_DOCTOR_VERSION} self-test failed (exit code ${rc}): on the fixture, each gate rule (${GATE_RULES}) must fire exactly once and the parse error in the .yaml file must be reported. A rule ID may be unknown or renamed, or a rule changed behaviour; the gate cannot be trusted."
+            cat "${tools}/self-test.json" || true
+            exit 1
+          fi
+          echo "ci-doctor self-test: each gate rule fired once and the parse error was reported"
+
+      # Runs first so the hints are visible even when the gate below fails.
+      - name: Advisory - cost and reliability hygiene (annotations only)
+        run: |
+          set -uo pipefail
+          tools="${RUNNER_TEMP}/ci-doctor"
+          if [ ! -d .github/workflows ]; then
+            exit 0
+          fi
+          # ci-doctor exits 1 on any error-severity finding, and parse errors
+          # always are. Under the runner's `bash -e` that would end this step
+          # before its annotations and skip the gate below, which is the step
+          # that reports parse errors. The gate decides; this step never fails.
+          node "${tools}/bin/ci-doctor.js" --only="${ADVISORY_RULES}" --json . > "${tools}/advisory.json" || true
+          if ! jq -e '.findings | type == "array"' "${tools}/advisory.json" > /dev/null 2>&1; then
+            echo "::notice::ci-doctor produced no advisory report"
+            exit 0
+          fi
+          jq -r '.findings[] | select(.ruleId != "parse-error")
+                 | "::warning file=\(.filename),line=\(.line),col=\(.column),title=ci-doctor \(.ruleId)::\(.message | gsub("%";"%25") | gsub("\r";"%0D") | gsub("\n";"%0A"))"' \
+            "${tools}/advisory.json"
+          exit 0
+
+      - name: Gate - job timeouts, concurrency groups, parse errors
+        run: |
+          set -euo pipefail
+          tools="${RUNNER_TEMP}/ci-doctor"
+          if [ ! -d .github/workflows ]; then
+            echo "no .github/workflows directory in this repository; nothing to audit"
+            exit 0
+          fi
+          set +e
+          node "${tools}/bin/ci-doctor.js" --only="${GATE_RULES}" --json . > "${tools}/gate.json"
+          rc=$?
+          set -e
+          # ci-doctor exits 0 (no error-level findings) or 1 (error-level findings,
+          # i.e. parse errors) after writing its report. Any other exit code, or a
+          # report without a findings array, means the audit did not complete:
+          # fail closed instead of reporting a clean run.
+          case "${rc}" in
+            0|1) ;;
+            *)
+              echo "::error::ci-doctor did not complete (exit code ${rc})"
+              exit 1
+              ;;
+          esac
+          if ! count=$(jq -e '.findings | if type == "array" then length else error("no findings array") end' "${tools}/gate.json" 2>/dev/null); then
+            echo "::error::ci-doctor did not produce a valid findings report (exit code ${rc})"
+            exit 1
+          fi
+          jq -r '.findings[]
+                 | "::error file=\(.filename),line=\(.line),col=\(.column),title=ci-doctor \(.ruleId)::\(.message | gsub("%";"%25") | gsub("\r";"%0D") | gsub("\n";"%0A"))"' \
+            "${tools}/gate.json"
+          if [ "${count}" -gt 0 ]; then
+            echo "::error::ci-doctor: ${count} blocking finding(s). Add timeout-minutes to every job, a concurrency block to workflows triggered by push or pull_request, and fix YAML parse errors."
+            exit 1
+          fi
+          echo "ci-doctor: no blocking findings"

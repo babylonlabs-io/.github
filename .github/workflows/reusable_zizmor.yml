@@ -1,0 +1,263 @@
+name: Audit Workflows (zizmor)
+
+on:
+  pull_request:
+    # edited: a PR moved to another base branch is audited again, since the
+    # config choice below reads the base. Title and body edits re-run it too;
+    # don't filter them out with `if:`, a skipped run reports success.
+    types: [opened, synchronize, reopened, edited]
+
+  merge_group:
+
+  workflow_call:
+
+permissions: {}
+
+# Only runs of the same PR share a group, so a new push to a PR cancels that
+# PR's superseded run. Every other run (push, merge queue) gets a group of its
+# own and is never cancelled or replaced: a group holds one running and one
+# pending run, and a newer run replaces the pending one whatever
+# cancel-in-progress says. Keyed on the workflow file (github.workflow_ref), not
+# the display name, so a same-named run never shares the group; the literal
+# keeps the two audits called from one caller apart.
+concurrency:
+  group: ${{ github.workflow_ref }}-zizmor-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  zizmor:
+    name: zizmor
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    env:
+      # Upstream release image, pinned by digest. The digest is the one
+      # zizmor-action v0.6.4 ships for 1.30.1 and matches the registry tag
+      # (verified 2026-09-22). Bump the tag and the digest together.
+      ZIZMOR_IMAGE: ghcr.io/zizmorcore/zizmor:1.30.1@sha256:a2eb396d886c053073405c7a980f2139ba2248ec172243cfa3841e57196e8101
+    steps:
+      - name: Checkout calling repo
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2 https://github.com/actions/checkout/releases/tag/v6.0.2
+        with:
+          persist-credentials: false
+          # The PR merge commit plus its parents: the base commit (HEAD^1) is
+          # where the next step reads zizmor's config from. A merge-queue
+          # group can sit many commits above its base: full history there.
+          fetch-depth: ${{ github.event_name == 'merge_group' && '0' || '2' }}
+
+      # A PR must neither waive its own findings nor break the waivers its
+      # base relies on. On pull requests and merge-queue runs:
+      # - a change to zizmor's config files only is audited with its own
+      #   config: that is how a waiver gets added or repaired, in a PR of its
+      #   own, also for a finding that is already on the base;
+      # - any other change is audited with the base commit's config (none on
+      #   the base: --no-config), so its own waivers don't count; if it also
+      #   edits the config, it must pass with its own config too, so it cannot
+      #   drop or break a waiver;
+      # - a change that adds an inline `zizmor: ignore` comment fails.
+      # Residual: a new finding placed where a waiver already on the base
+      # applies (an ignored file or line, a span with a merged inline ignore)
+      # stays waived, so prefer file:line:col config entries.
+      # pull_request_target fails: its checkout is the base, not the PR. Push,
+      # workflow_dispatch and schedule audit the tree with its own config, as
+      # zizmor finds it; any other event fails.
+      - name: Choose zizmor's config, reject self-waivers
+        id: config
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
+        run: |
+          set -euo pipefail
+          # zizmor 1.30.1 reads the first of these that exists, in this order,
+          # and no config file below the repository root.
+          config_files=(.github/zizmor.yml .github/zizmor.yaml zizmor.yml zizmor.yaml)
+          not_config=()
+          for f in "${config_files[@]}"; do
+            not_config+=(":(exclude)${f}")
+          done
+          # "tree": the config in the checkout, as zizmor finds it;
+          # "base": the base commit's config.
+          runs="tree"
+          case "${EVENT_NAME}" in
+            pull_request_target)
+              echo "::error::run this check on pull_request, not pull_request_target: there the checkout is the base branch, so the PR would never be audited"
+              exit 1
+              ;;
+            pull_request|merge_group)
+              # pull_request: the merge commit's first parent is the base.
+              # merge_group: the queue names its base (full history fetched).
+              if [ "${EVENT_NAME}" = "merge_group" ]; then
+                base="${MERGE_GROUP_BASE_SHA}"
+              else
+                base=$(git rev-parse --verify --quiet 'HEAD^1') || base=""
+              fi
+              if [ -z "${base}" ] || ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
+                echo "::error::cannot find the base commit (${base:-none}) in the checkout"
+                exit 1
+              fi
+              # Succeeds when the paths differ between the base and HEAD. A
+              # git error fails the step instead of reading as either answer.
+              differs() {
+                local rc=0
+                git diff --quiet --no-renames --no-ext-diff --no-textconv "${base}" HEAD -- "$@" || rc=$?
+                case "${rc}" in
+                  0) return 1 ;;
+                  1) return 0 ;;
+                  *) echo "::error::git diff failed (exit code ${rc})"; exit 1 ;;
+                esac
+              }
+              if ! differs "${config_files[@]}"; then
+                runs="base"
+              elif differs . "${not_config[@]}"; then
+                runs="base tree"
+                echo "zizmor config: this change edits zizmor's config and other files, so it must pass with the base commit's config and with its own"
+              else
+                echo "zizmor config: this change edits only zizmor's config, so it is audited with that config"
+              fi
+              if [ "${runs}" != "tree" ]; then
+                for f in "${config_files[@]}"; do
+                  if git cat-file -e "${base}:${f}" 2>/dev/null; then
+                    git show "${base}:${f}" > "${RUNNER_TEMP}/zizmor-base.yml"
+                    echo "zizmor config: ${f} from the base commit ${base:0:12}"
+                    break
+                  fi
+                done
+                [ -f "${RUNNER_TEMP}/zizmor-base.yml" ] || echo "zizmor config: none on the base commit"
+              fi
+              # An ignore comment on an added line of a .yml/.yaml file, other
+              # than zizmor's config files; docs may mention the syntax, so
+              # other file types are not checked. zizmor 1.30.1 honours only a
+              # hash, one space and `zizmor: ignore[...]` on the finding's line;
+              # the pattern also takes other whitespace and any case, and
+              # nothing looser: comments that merely mention zizmor and
+              # ignoring must not fail a PR (this file has several).
+              # --text: a .gitattributes in the change (`*.yml -diff`) would
+              # otherwise print the YAML as binary and hide the added lines;
+              # --no-ext-diff/--no-textconv: no diff drivers either;
+              # --no-renames: a file moved into place shows all its lines as
+              # added; added lines are marked `>`, so no content line can pass
+              # for a `+++` header. A failing git diff fails the step.
+              git diff --text --no-ext-diff --no-textconv --no-renames --unified=0 \
+                --output-indicator-new='>' "${base}" HEAD \
+                -- '*.yml' '*.yaml' "${not_config[@]}" > "${RUNNER_TEMP}/change.diff"
+              # grep -a under LC_ALL=C: a NUL byte or invalid UTF-8 anywhere in
+              # the diff would otherwise make grep treat it as binary and print
+              # no matching line. Exit 1 is "no match"; anything above fails.
+              rc=0
+              added=$(LC_ALL=C grep -a -i -E '^>.*#[[:space:]]*zizmor:[[:space:]]*ignore' "${RUNNER_TEMP}/change.diff") || rc=$?
+              if [ "${rc}" -gt 1 ]; then
+                echo "::error::scanning the change for inline ignore comments failed (grep exit code ${rc})"
+                exit 1
+              fi
+              if [ -n "${added}" ]; then
+                echo "::error::this PR adds inline zizmor ignore comments. A PR cannot waive its own findings: fix the finding, or add the waiver to .github/zizmor.yml in a PR that changes only that file."
+                printf '%s\n' "${added}"
+                exit 1
+              fi
+              ;;
+            push|workflow_dispatch|schedule)
+              # A merged tree, audited with its own config.
+              ;;
+            *)
+              # Other events (a caller triggered by pull_request_review, say)
+              # may check out a PR's code: never judge it by its own config.
+              echo "::error::zizmor check: event '${EVENT_NAME:-none}' is not supported; call it from pull_request, merge_group, push, workflow_dispatch or schedule"
+              exit 1
+              ;;
+          esac
+          echo "runs=${runs}" >> "${GITHUB_OUTPUT}"
+
+      # Audits every workflow, composite action and Dependabot config in the
+      # calling repo: template injection, dangerous triggers, excessive
+      # permissions, unpinned actions and images, cache poisoning, leaked
+      # credentials, known-vulnerable actions. Findings at or above medium
+      # severity and medium confidence fail the check. Accepted findings are
+      # ignored per repo in .github/zizmor.yml; the previous step decides
+      # which config (or both) a pull request is audited with.
+      # --collect=all also audits files that .gitignore lists (zizmor honours
+      # .gitignore by default, GitHub does not: a force-added workflow would
+      # run unaudited), and --strict-collection fails on an input zizmor
+      # cannot parse instead of skipping it with a warning.
+      # GH_TOKEN (read-only on pull_request) is only used by the online audits
+      # (known-vulnerable-actions, impostor-commit, typosquat-uses).
+      - name: Audit GitHub Actions workflows with zizmor
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUNS: ${{ steps.config.outputs.runs }}
+        run: |
+          set -uo pipefail
+
+          echo "::group::Pull zizmor image"
+          docker pull "${ZIZMOR_IMAGE}" || { echo "::error::could not pull ${ZIZMOR_IMAGE}"; exit 1; }
+          echo "::endgroup::"
+
+          # One audit of the checkout; $1 picks the config: "base" (the file
+          # the previous step took from the base commit, or none) or "tree"
+          # (the checkout's own, as zizmor finds it).
+          audit() {
+            local mounts=() config=() label rc=0
+            case "$1" in
+              base)
+                label="config from the base commit"
+                if [ -f "${RUNNER_TEMP}/zizmor-base.yml" ]; then
+                  mounts=(--volume "${RUNNER_TEMP}/zizmor-base.yml:/zizmor-base.yml:ro")
+                  config=(--config /zizmor-base.yml)
+                else
+                  config=(--no-config)
+                fi
+                ;;
+              tree)
+                label="config in the checkout"
+                ;;
+              *)
+                echo "::error::unknown zizmor run '$1'"
+                return 1
+                ;;
+            esac
+            echo "zizmor with the ${label}:"
+            # The step has no `shell:`, so the runner runs it as `bash -e`:
+            # `|| rc=$?` keeps docker run's exit code for the case below
+            # instead of ending the step. ${a[@]+"${a[@]}"} expands an empty
+            # array safely under `set -u`.
+            docker run --rm \
+              --volume "${GITHUB_WORKSPACE}:/workspace:ro" \
+              ${mounts[@]+"${mounts[@]}"} \
+              --workdir /workspace \
+              --env GH_TOKEN \
+              "${ZIZMOR_IMAGE}" \
+              --persona regular \
+              --min-severity medium \
+              --min-confidence medium \
+              --collect=all \
+              --strict-collection \
+              ${config[@]+"${config[@]}"} \
+              --format github \
+              -- . || rc=$?
+            case "${rc}" in
+              0)
+                echo "zizmor (${label}): no findings at or above medium severity and medium confidence"
+                ;;
+              3)
+                echo "::warning::zizmor found nothing to audit in this repository (no workflows, actions or dependabot config); passing"
+                ;;
+              1[0-4])
+                echo "::error::zizmor (${label}) reported findings (exit code ${rc}). Fix them, or waive accepted findings in .github/zizmor.yml in a PR that changes only that file"
+                return 1
+                ;;
+              *)
+                echo "::error::zizmor (${label}) did not complete (exit code ${rc})"
+                return 1
+                ;;
+            esac
+          }
+
+          # RUNS comes from the previous step ("base", "tree" or "base tree"),
+          # never from PR content; unquoted so it splits into words.
+          [ -n "${RUNS}" ] || { echo "::error::no zizmor run was chosen"; exit 1; }
+          status=0
+          # shellcheck disable=SC2086
+          for run in ${RUNS}; do
+            audit "${run}" || status=1
+          done
+          exit "${status}"

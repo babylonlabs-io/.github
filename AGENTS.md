@@ -35,12 +35,14 @@ supply-chain change.** Rules below derive from real fixes here (PRs #56, #67, #7
     reusable_backport.yml               # uses pull_request_target — see rules
     reusable_changelog_reminder.yml
     reusable_check_pinned_actions.yml   # the SHA-pin enforcer; do NOT weaken
+    reusable_ci_doctor.yml              # ci-doctor hygiene gate (job timeouts, concurrency, parse errors); org required check once its ruleset is active
     reusable_docker_pipeline.yml        # build + Trivy + Hadolint + push (OIDC)
     test_ecr_tag_collisions.yml          # PR regression tests (tests/): ECR publication, runner inputs, image tag / build context validation, Docker credential cleanup
     reusable_github_release.yml
     reusable_go_lint_test.yml
     reusable_go_releaser.yml
     reusable_sync_branch.yml
+    reusable_zizmor.yml                 # zizmor security audit of the calling repo workflows; org required check once its ruleset is active
 CHANGELOG.md                            # update on every functional change
 ```
 
@@ -192,8 +194,9 @@ a reusable check out of its caller's group, and keying on the file (not the
 display name) keeps a same-named run out of it. Non-reusable workflows may use a
 fixed name (`test_ecr_tag_collisions.yml`). Every job sets
 `timeout-minutes`; reusable workflows with long jobs take a `timeout_minutes`
-input instead (docker pipeline, go lint/test, goreleaser). This is a
-convention until the ci-doctor required check (#94) lands and enforces it.
+input instead (docker pipeline, go lint/test, goreleaser, backport).
+`reusable_ci_doctor.yml` checks both on this repository's PRs, and org-wide
+once its ruleset is active.
 
 ## Commit signatures
 
@@ -275,6 +278,9 @@ done
 ```
 
 CI: `reusable_check_pinned_actions.yml` runs on PR and gates SHA-pin rules.
+`reusable_zizmor.yml` (security audit) and `reusable_ci_doctor.yml` (job timeouts,
+concurrency, parse errors) run on this repository's PRs too, and become org-wide
+required checks once the ruleset is active.
 `test_ecr_tag_collisions.yml` runs everything under `tests/` (ECR publication,
 runner-label validation, image tag and build context validation, Docker
 credential cleanup) on PRs changing the Docker
