@@ -27,9 +27,22 @@ permissions:
   contents: read
   pull-requests: write
 
+# Only runs for the same PR share a group (pull_request, or a caller's
+# pull_request_target: both carry the PR), so a new run for a PR cancels
+# that PR's superseded run. Every other run (push, merge queue) gets a group
+# of its own and is never cancelled or replaced: a group holds one running
+# and one pending run, and a newer run replaces the pending one whatever
+# cancel-in-progress says. Keyed on the workflow file (github.workflow_ref),
+# not the display name, so a same-named run never shares the group; the
+# literal keeps two checks called from one caller apart.
+concurrency:
+  group: ${{ github.workflow_ref }}-authenticate-commits-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
 jobs:
   validate:
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2 https://github.com/actions/checkout/releases/tag/v6.0.2
