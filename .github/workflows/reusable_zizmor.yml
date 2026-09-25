@@ -127,10 +127,11 @@ jobs:
               fi
               # An ignore comment on an added line of a .yml/.yaml file, other
               # than zizmor's config files; docs may mention the syntax, so
-              # other file types are not checked. zizmor 1.30.1 honours only
-              # `# zizmor: ignore[...]` on the finding's line; the match here is
-              # looser (any case, any separators) so a future parser can't
-              # outgrow it.
+              # other file types are not checked. zizmor 1.30.1 honours only a
+              # hash, one space and `zizmor: ignore[...]` on the finding's line;
+              # the pattern also takes other whitespace and any case, and
+              # nothing looser: comments that merely mention zizmor and
+              # ignoring must not fail a PR (this file has several).
               # --text: a .gitattributes in the change (`*.yml -diff`) would
               # otherwise print the YAML as binary and hide the added lines;
               # --no-ext-diff/--no-textconv: no diff drivers either;
@@ -144,7 +145,7 @@ jobs:
               # the diff would otherwise make grep treat it as binary and print
               # no matching line. Exit 1 is "no match"; anything above fails.
               rc=0
-              added=$(LC_ALL=C grep -a -i -E '^>.*#.*zizmor[^[:alnum:]]*ignore' "${RUNNER_TEMP}/change.diff") || rc=$?
+              added=$(LC_ALL=C grep -a -i -E '^>.*#[[:space:]]*zizmor:[[:space:]]*ignore' "${RUNNER_TEMP}/change.diff") || rc=$?
               if [ "${rc}" -gt 1 ]; then
                 echo "::error::scanning the change for inline ignore comments failed (grep exit code ${rc})"
                 exit 1
