@@ -41,6 +41,10 @@ jobs:
       # severity and medium confidence fail the check. Accepted findings are
       # ignored per repo in .github/zizmor.yml, which zizmor picks up on its
       # own and which goes through normal code-owner review.
+      # --collect=all also audits files that .gitignore lists (zizmor honours
+      # .gitignore by default, GitHub does not: a force-added workflow would
+      # run unaudited), and --strict-collection fails on an input zizmor
+      # cannot parse instead of skipping it with a warning.
       # GH_TOKEN (read-only on pull_request) is only used by the online audits
       # (known-vulnerable-actions, impostor-commit, typosquat-uses).
       - name: Audit GitHub Actions workflows with zizmor
@@ -53,6 +57,11 @@ jobs:
           docker pull "${ZIZMOR_IMAGE}" || { echo "::error::could not pull ${ZIZMOR_IMAGE}"; exit 1; }
           echo "::endgroup::"
 
+          # The step has no `shell:`, so the runner runs it as `bash -e`: a
+          # non-zero exit from docker run would end the step before rc is
+          # read, and exit 3 (nothing to audit) would fail it. `|| rc=$?`
+          # keeps every exit code for the case below.
+          rc=0
           docker run --rm \
             --volume "${GITHUB_WORKSPACE}:/workspace:ro" \
             --workdir /workspace \
@@ -61,9 +70,10 @@ jobs:
             --persona regular \
             --min-severity medium \
             --min-confidence medium \
+            --collect=all \
+            --strict-collection \
             --format github \
-            -- .
-          rc=$?
+            -- . || rc=$?
 
           case "${rc}" in
             0)

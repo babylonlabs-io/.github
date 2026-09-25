@@ -36,11 +36,15 @@ jobs:
       # (add timeout-minutes to the job / a concurrency block to the workflow).
       # YAML parse errors block as well: GitHub cannot run such a workflow.
       GATE_RULES: missing-timeout,missing-concurrency
-      # Advisory rules: cost and reliability hygiene, annotations only.
-      # Excluded on purpose: pinned-action-sha, missing-permissions and
-      # docker-no-pin (enforced by reusable_check_pinned_actions and zizmor)
-      # and deprecated-action (stale hard-coded version table, false positives).
-      ADVISORY_RULES: missing-cache,wide-trigger,expensive-runner,artifact-no-retention,fetch-depth-zero,matrix-overcommit,stale-cache-key,fail-fast-true,always-run-on-pr,service-no-healthcheck
+      # Advisory rules: cost, reliability and image-pinning hygiene,
+      # annotations only. docker-no-pin stays advisory because nothing else
+      # checks image pinning: reusable_check_pinned_actions reads only `uses:`
+      # lines containing "@", and zizmor at the regular persona does not flag
+      # tag-pinned container, services or docker:// images.
+      # Excluded on purpose: pinned-action-sha and missing-permissions
+      # (enforced by reusable_check_pinned_actions and zizmor) and
+      # deprecated-action (stale hard-coded version table, false positives).
+      ADVISORY_RULES: missing-cache,wide-trigger,expensive-runner,artifact-no-retention,fetch-depth-zero,matrix-overcommit,stale-cache-key,fail-fast-true,always-run-on-pr,service-no-healthcheck,docker-no-pin
     steps:
       - name: Checkout calling repo
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2 https://github.com/actions/checkout/releases/tag/v6.0.2
@@ -70,7 +74,11 @@ jobs:
           if [ ! -d .github/workflows ]; then
             exit 0
           fi
-          node "${tools}/bin/ci-doctor.js" --only="${ADVISORY_RULES}" --json . > "${tools}/advisory.json"
+          # ci-doctor exits 1 on any error-severity finding, and parse errors
+          # always are. Under the runner's `bash -e` that would end this step
+          # before its annotations and skip the gate below, which is the step
+          # that reports parse errors. The gate decides; this step never fails.
+          node "${tools}/bin/ci-doctor.js" --only="${ADVISORY_RULES}" --json . > "${tools}/advisory.json" || true
           if ! jq -e '.findings | type == "array"' "${tools}/advisory.json" > /dev/null 2>&1; then
             echo "::notice::ci-doctor produced no advisory report"
             exit 0
