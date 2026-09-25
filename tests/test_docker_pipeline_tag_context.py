@@ -117,9 +117,27 @@ class DockerPipelineTagAndContext(unittest.TestCase):
     def setUpClass(cls):
         cls.jobs = load_workflow()['jobs']
         cls.bash = shutil.which('bash')
-        cls.tools = {name: shutil.which(name) for name in ('jq', 'xargs', 'tr', 'echo')}
+        cls.tools = {name: shutil.which(name) for name in ('jq', 'xargs', 'tr', 'echo', 'cat')}
         if not cls.bash or not all(cls.tools.values()):
-            raise RuntimeError('bash, jq, xargs, tr and echo are required')
+            raise RuntimeError('bash, jq, xargs, tr, echo and cat are required')
+
+    # Per-platform digests the build legs record and the merge jobs consume (#47).
+    DIGESTS = {'linux-amd64': 'sha256:' + '11' * 32, 'linux-arm64': 'sha256:' + '22' * 32}
+
+    # Registry clients the merge jobs query before publishing. Defaults say the
+    # final tag is absent; the env switches pick the answers a merge must refuse.
+    REGISTRY_STUBS = {
+        'aws': '''#!/bin/bash
+# ecr batch-get-image
+if [ -n "${AWS_GARBLED:-}" ]; then echo '{"images":[],"failures":[]}'; exit 0; fi
+if [ "${TAG_EXISTS:-0}" = 1 ]; then echo '{"images":[{"imageId":{}}],"failures":[]}'; exit 0; fi
+echo '{"images":[],"failures":[{"failureCode":"ImageNotFound","imageId":{"imageTag":"v1.2.3"}}]}'
+''',
+        'curl': '''#!/bin/bash
+for a in "$@"; do case "$a" in *auth.docker.io*) echo '{"token":"stub"}'; exit 0 ;; esac; done
+echo "${HTTP_CODE:-404}"
+''',
+    }
 
     def step(self, job, step_id=None, name=None):
         for step in self.jobs[job]['steps']:
@@ -127,10 +145,13 @@ class DockerPipelineTagAndContext(unittest.TestCase):
                 return step
         raise AssertionError(f'step not found: {job} {step_id or name}')
 
-    def run_script(self, script, env, tools=(), cwd=None):
+    def run_script(self, script, env, tools=(), cwd=None, stubs=None, digests=None):
         """Run a run: block the way the runner does (bash -e) with an empty
         $GITHUB_OUTPUT/$GITHUB_ENV, a mocked docker and no host PATH. The
-        UTF-8 locale is what the hosted runners use."""
+        UTF-8 locale is what the hosted runners use.
+
+        `stubs` adds extra executables (registry clients); `digests` writes the
+        per-platform digest files the merge jobs read out of $RUNNER_TEMP."""
         with tempfile.TemporaryDirectory() as directory:
             directory = Path(directory)
             bin_dir = directory / 'bin'
@@ -140,11 +161,23 @@ class DockerPipelineTagAndContext(unittest.TestCase):
             docker.chmod(0o755)
             for tool in tools:
                 (bin_dir / tool).symlink_to(self.tools[tool])
+            for name, body in (stubs or {}).items():
+                stub = bin_dir / name
+                stub.write_text(body)
+                stub.chmod(0o755)
+            runner_temp = directory / 'runner-temp'
+            runner_temp.mkdir()
+            if digests is not None:
+                digest_dir = runner_temp / 'digests'
+                digest_dir.mkdir()
+                for pair, digest in digests.items():
+                    (digest_dir / pair).write_text(digest)
             output, github_env = directory / 'output', directory / 'env'
             output.touch()
             github_env.touch()
             full_env = dict(PATH=str(bin_dir), GITHUB_OUTPUT=str(output), GITHUB_ENV=str(github_env),
-                            LANG='C.UTF-8', LC_ALL='C.UTF-8', DOCKER_LOG=str(directory / 'docker.log'))
+                            LANG='C.UTF-8', LC_ALL='C.UTF-8', DOCKER_LOG=str(directory / 'docker.log'),
+                            RUNNER_TEMP=str(runner_temp))
             full_env.update(env)
             result = subprocess.run([self.bash, '--noprofile', '--norc', '-e', '-c', script],
                                     env=full_env, text=True, capture_output=True, cwd=cwd)
@@ -354,19 +387,30 @@ class DockerPipelineTagAndContext(unittest.TestCase):
         self.assertEqual(len(seen), 4 * 3 * 2)
 
     def test_publication_steps_use_only_this_runs_platform_tags(self):
-        for job, step_name in (('docker_build', 'Push to Docker Hub'), ('docker_build', 'Push to ECR'),
-                               ('merge_dockerhub', 'Create manifest list and push'),
-                               ('merge_ecr', 'Create manifest list and push')):
-            step = self.step(job, name=step_name)
-            with self.subTest(job=job, step=step_name):
+        # The platform legs stage under the run-scoped prefix...
+        for step_name in ('Push to Docker Hub', 'Push to ECR'):
+            step = self.step('docker_build', name=step_name)
+            with self.subTest(step=step_name):
                 self.assertEqual(step['env']['PLATFORM_TAG_PREFIX'], OUT % 'platform-tag-prefix')
                 self.assertIn('${PLATFORM_TAG_PREFIX}-', step['run'])
                 # The final tag never names a platform image.
                 self.assertNotIn('${IMAGE_TAG}-', step['run'])
+                # ...and record the digest the push returned (#47).
+                self.assertIn('RepoDigests', step['run'])
+                self.assertIn('sha256:[0-9a-f]{64}', step['run'])
+        # ...and the merge jobs consume those digests, never a tag name, so a
+        # staging tag moved after the push cannot substitute the bytes (#47).
+        for job in ('merge_dockerhub', 'merge_ecr'):
+            step = self.step(job, name='Create manifest list and push')
+            with self.subTest(job=job):
+                self.assertNotIn('PLATFORM_TAG_PREFIX', step['env'])
+                self.assertNotIn('${PLATFORM_TAG_PREFIX}', step['run'])
+                self.assertIn('$RUNNER_TEMP/digests/', step['run'])
+                self.assertIn('imagetools create -t "$first_tag" "${source_refs[@]}"', step['run'])
         # The prefix is produced by the credential-free validator, not recomputed.
         self.assertEqual(self.jobs['prepare-metadata']['outputs']['platform-tag-prefix'],
                          '${{ steps.set_image_tag.outputs.PLATFORM_TAG_PREFIX }}')
-        self.assertEqual(WORKFLOW.read_text().count('needs.prepare-metadata.outputs.platform-tag-prefix'), 4)
+        self.assertEqual(WORKFLOW.read_text().count('needs.prepare-metadata.outputs.platform-tag-prefix'), 2)
 
     def test_merge_jobs_publish_only_the_validated_tag(self):
         text = WORKFLOW.read_text()
@@ -382,23 +426,95 @@ class DockerPipelineTagAndContext(unittest.TestCase):
             for final in ('release-a', 'feat-a-b', 'latest', ''):
                 with self.subTest(job=job, final=final):
                     env = {registry_env: registry, 'IMAGE_NAME': 'app', 'IMAGE_TAG': '.release-a',
-                           'PLATFORM_TAG_PREFIX': '.release-a' + RUN_SCOPE, 'BUILD_MATRIX': matrix,
+                           'BUILD_MATRIX': matrix, 'DOCKERHUB_USERNAME': 'u', 'DOCKERHUB_TOKEN': 't',
                            'DOCKER_METADATA_OUTPUT_JSON': json.dumps({'tags': [f'{registry}/app:{final}'] if final else []})}
-                    result, _, _, docker_calls = self.run_script(step['run'], env, tools=('jq', 'xargs', 'tr', 'echo'))
+                    result, _, _, docker_calls = self.run_script(
+                        step['run'], env, tools=('jq', 'cat', 'tr', 'echo'),
+                        stubs=self.REGISTRY_STUBS, digests=self.DIGESTS)
                     self.assertNotEqual(result.returncode, 0)
                     self.assertEqual(docker_calls, '')
-        # Matching tag: Docker Hub publishes the validated tag from the two
-        # platform tags this run pushed, taking the prefix from the real validator.
-        tag, prefix = self.accepted_outputs(image_tag='v1.2.3')
+        # Matching tag: Docker Hub publishes the validated tag from the digests
+        # the two platform legs recorded, not from their staging tag names.
+        tag, _ = self.accepted_outputs(image_tag='v1.2.3')
         step = self.step('merge_dockerhub', name='Create manifest list and push')
         env = dict(DOCKERHUB_REGISTRY='babylonlabs', IMAGE_NAME='app', IMAGE_TAG=tag,
-                   PLATFORM_TAG_PREFIX=prefix, BUILD_MATRIX=matrix,
+                   DOCKERHUB_USERNAME='u', DOCKERHUB_TOKEN='t', BUILD_MATRIX=matrix,
                    DOCKER_METADATA_OUTPUT_JSON=json.dumps({'tags': ['babylonlabs/app:v1.2.3', 'babylonlabs/app:latest']}))
-        result, _, _, docker_calls = self.run_script(step['run'], env, tools=('jq', 'xargs', 'tr', 'echo'))
+        result, _, _, docker_calls = self.run_script(step['run'], env, tools=('jq', 'cat', 'tr', 'echo'),
+                                                    stubs=self.REGISTRY_STUBS, digests=self.DIGESTS)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(docker_calls.split(), ['buildx', 'imagetools', 'create', '-t', 'babylonlabs/app:v1.2.3',
-                                                f'babylonlabs/app:v1.2.3{RUN_SCOPE}-linux-amd64',
-                                                f'babylonlabs/app:v1.2.3{RUN_SCOPE}-linux-arm64'])
+                                                'babylonlabs/app@' + self.DIGESTS['linux-amd64'],
+                                                'babylonlabs/app@' + self.DIGESTS['linux-arm64']])
+
+    def test_digest_artifacts_are_keyed_on_the_image_not_the_run_attempt(self):
+        """Two calls of this workflow in one run build different images
+        (aave-v4-bots, covenant-emulator and babylon-desk each call it twice), so
+        the artifact name has to carry the image. It must not carry the run
+        attempt, or re-running a failed merge job looks for artifacts the
+        still-green build jobs never re-uploaded."""
+        image = OUT % 'image-name'
+        for registry, merge_job in (('dockerhub', 'merge_dockerhub'), ('ecr', 'merge_ecr')):
+            upload = self.step('docker_build', name=f'Upload {"Docker Hub" if registry == "dockerhub" else "ECR"} platform digest')
+            download = self.step(merge_job, name='Download platform digests')
+            with self.subTest(registry=registry):
+                name = upload['with']['name']
+                self.assertIn(image, name, 'artifact name must distinguish the image')
+                self.assertIn('platform_pair', name, 'and the platform')
+                self.assertNotIn('run_attempt', name)
+                self.assertNotIn('run_attempt', download['with']['pattern'])
+                # A re-run of a build job re-uploads the same name.
+                self.assertTrue(upload['with']['overwrite'])
+                # The pattern must actually match what was uploaded.
+                self.assertEqual(download['with']['pattern'], f'digests-{registry}-{image}-*')
+                self.assertTrue(name.startswith(f'digests-{registry}-{image}-'))
+        # The two registries never collide with each other.
+        self.assertNotEqual(self.step('merge_dockerhub', name='Download platform digests')['with']['pattern'],
+                            self.step('merge_ecr', name='Download platform digests')['with']['pattern'])
+
+    def test_merge_refuses_a_final_tag_that_already_exists(self):
+        """#47: an existing final tag is never treated as success. ECR is
+        immutable, Docker Hub is not, so both have to refuse it — and a registry
+        that will not answer is not evidence of absence either."""
+        matrix = json.dumps({'include': [{'platform': 'linux/amd64'}, {'platform': 'linux/arm64'}]})
+        cases = (
+            ('merge_dockerhub', dict(DOCKERHUB_REGISTRY='babylonlabs', DOCKERHUB_USERNAME='u', DOCKERHUB_TOKEN='t'),
+             'babylonlabs', dict(HTTP_CODE='200'), dict(HTTP_CODE='503')),
+            ('merge_ecr', dict(AWS_ECR_REGISTRY_ID='123456789012.dkr.ecr.ap-east-1.amazonaws.com'),
+             '123456789012.dkr.ecr.ap-east-1.amazonaws.com', dict(TAG_EXISTS='1'), dict(AWS_GARBLED='1')),
+        )
+        for job, registry_env, registry, exists, unusable in cases:
+            step = self.step(job, name='Create manifest list and push')
+            for label, extra in (('already published', exists), ('registry will not answer', unusable)):
+                with self.subTest(job=job, case=label):
+                    env = dict(IMAGE_NAME='app', IMAGE_TAG='v1.2.3', BUILD_MATRIX=matrix,
+                               DOCKER_METADATA_OUTPUT_JSON=json.dumps({'tags': [f'{registry}/app:v1.2.3']}),
+                               **registry_env, **extra)
+                    result, _, _, docker_calls = self.run_script(
+                        step['run'], env, tools=('jq', 'cat', 'tr', 'echo'),
+                        stubs=self.REGISTRY_STUBS, digests=self.DIGESTS)
+                    self.assertNotEqual(result.returncode, 0, result.stdout)
+                    self.assertIn('::error::', result.stdout)
+                    self.assertEqual(docker_calls, '', 'nothing may be published')
+
+    def test_merge_refuses_a_missing_or_malformed_platform_digest(self):
+        """#47: the manifest is only ever built from digests this run recorded."""
+        matrix = json.dumps({'include': [{'platform': 'linux/amd64'}, {'platform': 'linux/arm64'}]})
+        step = self.step('merge_ecr', name='Create manifest list and push')
+        registry = '123456789012.dkr.ecr.ap-east-1.amazonaws.com'
+        for label, digests in (('missing', {'linux-amd64': self.DIGESTS['linux-amd64']}),
+                               ('malformed', dict(self.DIGESTS, **{'linux-arm64': 'not-a-digest'})),
+                               ('none recorded', {})):
+            with self.subTest(case=label):
+                env = dict(AWS_ECR_REGISTRY_ID=registry, IMAGE_NAME='app', IMAGE_TAG='v1.2.3',
+                           BUILD_MATRIX=matrix,
+                           DOCKER_METADATA_OUTPUT_JSON=json.dumps({'tags': [f'{registry}/app:v1.2.3']}))
+                result, _, _, docker_calls = self.run_script(
+                    step['run'], env, tools=('jq', 'cat', 'tr', 'echo'),
+                    stubs=self.REGISTRY_STUBS, digests=digests)
+                self.assertNotEqual(result.returncode, 0, result.stdout)
+                self.assertIn('::error::', result.stdout)
+                self.assertEqual(docker_calls, '')
 
     # --- #119: context and Dockerfile are paths inside the checkout -------------
 

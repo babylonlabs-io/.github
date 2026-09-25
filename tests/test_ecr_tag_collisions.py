@@ -16,9 +16,12 @@ class ECRTagCollisions(unittest.TestCase):
         workflow = Path(__file__).resolve().parents[1] / '.github/workflows/reusable_docker_pipeline.yml'
         cls.jobs = json.loads(subprocess.check_output(['yq', '-o=json', str(workflow)]))['jobs']
         cls.bash = shutil.which('bash')
-        cls.safe_commands = {name: shutil.which(name) for name in ('echo', 'jq', 'xargs', 'tr')}
+        cls.safe_commands = {name: shutil.which(name) for name in ('echo', 'jq', 'xargs', 'tr', 'awk', 'cat', 'mkdir')}
         if not cls.bash or not all(cls.safe_commands.values()):
-            raise RuntimeError('bash, echo, jq, xargs, and tr are required')
+            raise RuntimeError('bash, echo, jq, xargs, tr, awk, cat and mkdir are required')
+
+    # What the platform legs record and the merge job builds the manifest from (#47).
+    DIGESTS = {'linux-amd64': 'sha256:' + '11' * 32, 'linux-arm64': 'sha256:' + '22' * 32}
 
     def run_step(self, job, step_name, response, aws_exit=0, docker_exit=0):
         step = next(step for step in self.jobs[job]['steps'] if step.get('name') == step_name)
@@ -26,17 +29,28 @@ class ECRTagCollisions(unittest.TestCase):
             directory = Path(directory)
             for name, script in {
                 'aws': '#!/bin/bash\nprintf "%s\\n" "$*" >> "$AWS_LOG"\nprintf "%s\\n" "$AWS_RESPONSE"\nexit "$AWS_EXIT"\n',
-                'docker': '#!/bin/bash\nprintf "%s\\n" "$*" >> "$DOCKER_LOG"\nif [ "$1" = tag ]; then exit 0; fi\nexit "$DOCKER_EXIT"\n',
+                # `image inspect` answers with the digest the push returned, so the
+                # step can record it for the merge job (#47).
+                'docker': '#!/bin/bash\nprintf "%s\\n" "$*" >> "$DOCKER_LOG"\n'
+                          'if [ "$1" = tag ]; then exit 0; fi\n'
+                          'if [ "$1" = image ] && [ "$2" = inspect ]; then ref="${@: -1}"; printf "%s@%s\\n" "${ref%:*}" "$STUB_DIGEST"; exit 0; fi\n'
+                          'exit "$DOCKER_EXIT"\n',
             }.items():
                 command = directory / name
                 command.write_text(script)
                 command.chmod(0o755)
             for name, source in self.safe_commands.items():
                 (directory / name).symlink_to(source)
+            runner_temp = directory / 'runner-temp'
+            digest_dir = runner_temp / 'digests'
+            digest_dir.mkdir(parents=True)
+            for pair, digest in self.DIGESTS.items():
+                (digest_dir / pair).write_text(digest)
             # Deliberately do not inherit credentials, proxy settings, or the
             # host PATH. A future workflow regression cannot find curl, a real
             # aws CLI, or a real Docker daemon from this fixture.
-            env = dict(PATH=str(directory),
+            env = dict(PATH=str(directory), RUNNER_TEMP=str(runner_temp),
+                       STUB_DIGEST=self.DIGESTS['linux-amd64'],
                        AWS_LOG=str(directory / 'aws.log'), DOCKER_LOG=str(directory / 'docker.log'),
                        AWS_RESPONSE=response, AWS_EXIT=str(aws_exit), DOCKER_EXIT=str(docker_exit),
                        AWS_ECR_REGISTRY_ID='123456789012.dkr.ecr.ap-east-1.amazonaws.com',
