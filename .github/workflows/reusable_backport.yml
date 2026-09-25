@@ -36,8 +36,13 @@ jobs:
   backport:
     name: Backport
     runs-on: ubuntu-24.04
-    if: >
-      ${{ inputs.run-backport }}
+    timeout-minutes: 10
+    # One expression, no ${{ }} wrapper: mixing ${{ inputs.run-backport }}
+    # with bare text made the whole `if:` a non-empty string, which is always
+    # true, so the merged-only guard below never applied (zizmor
+    # unsound-condition).
+    if: >-
+      inputs.run-backport
       && github.event.pull_request.merged
       && (
         github.event.action == 'closed'
