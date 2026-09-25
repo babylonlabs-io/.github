@@ -2,18 +2,26 @@ name: Audit Workflow Hygiene (ci-doctor)
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened]
+    # edited: a PR moved to another base branch gets a new merge commit, so
+    # it is audited again. Title and body edits re-run it too; don't filter
+    # them out with `if:`, a skipped run reports success.
+    types: [opened, synchronize, reopened, edited]
+
+  merge_group:
 
   workflow_call:
 
 permissions: {}
 
-# One group per audit, caller workflow and ref: a new push cancels only the
-# superseded run of this same audit. Inside a called workflow github.workflow
-# is the caller's name, so the literal keeps this group distinct from the
-# caller's own group and from the other audit workflow.
+# Only runs of the same PR share a group, so a new push to a PR cancels that
+# PR's superseded run. Every other run (push, merge queue) gets a group of its
+# own and is never cancelled or replaced: a group holds one running and one
+# pending run, and a newer run replaces the pending one whatever
+# cancel-in-progress says. Keyed on the workflow file (github.workflow_ref), not
+# the display name, so a same-named run never shares the group; the literal
+# keeps the two audits called from one caller apart.
 concurrency:
-  group: ${{ github.workflow }}-ci-doctor-${{ github.ref }}
+  group: ${{ github.workflow_ref }}-ci-doctor-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: true
 
 jobs:
@@ -65,6 +73,43 @@ jobs:
           tar -xzf "${tools}/ci-doctor.tgz" -C "${tools}" --strip-components=1
           tar -xzf "${tools}/yaml.tgz" -C "${tools}/node_modules/yaml" --strip-components=1
           echo "ci-doctor $(node "${tools}/bin/ci-doctor.js" --version) on node $(node --version)"
+
+      # --only accepts any name: an unknown or renamed rule ID runs nothing
+      # and reports nothing, which the gate would read as clean. So the gate
+      # rules first run over a fixed fixture, where each must fire exactly
+      # once (a job that calls a reusable workflow cannot take
+      # timeout-minutes and must not be flagged) and a YAML parse error in a
+      # .yaml file must still be reported (so .yaml workflows are still read).
+      # When a version bump or a GATE_RULES edit breaks this, fix the rule IDs
+      # or extend the fixture.
+      - name: Self-test - the gate rules fire on a known-bad fixture
+        run: |
+          set -euo pipefail
+          tools="${RUNNER_TEMP}/ci-doctor"
+          fixture="${RUNNER_TEMP}/ci-doctor-fixture"
+          mkdir -p "${fixture}/.github/workflows"
+          printf '%s\n' \
+            'on: pull_request' \
+            'jobs:' \
+            '  plain:' \
+            '    runs-on: ubuntu-24.04' \
+            '    steps:' \
+            '      - run: echo' \
+            '  called:' \
+            '    uses: ./.github/workflows/called.yml' \
+            > "${fixture}/.github/workflows/rules.yml"
+          printf 'jobs: [\n' > "${fixture}/.github/workflows/broken.yaml"
+          rc=0
+          node "${tools}/bin/ci-doctor.js" --only="${GATE_RULES}" --json "${fixture}" > "${tools}/self-test.json" || rc=$?
+          if ! jq -e --arg rules "${GATE_RULES}" '
+                ([.findings[].ruleId | select(. != "parse-error")] | sort) == ($rules | split(",") | sort)
+                and any(.findings[]; .ruleId == "parse-error" and .filename == ".github/workflows/broken.yaml")' \
+                "${tools}/self-test.json" > /dev/null 2>&1; then
+            echo "::error::ci-doctor ${CI_DOCTOR_VERSION} self-test failed (exit code ${rc}): on the fixture, each gate rule (${GATE_RULES}) must fire exactly once and the parse error in the .yaml file must be reported. A rule ID may be unknown or renamed, or a rule changed behaviour; the gate cannot be trusted."
+            cat "${tools}/self-test.json" || true
+            exit 1
+          fi
+          echo "ci-doctor self-test: each gate rule fired once and the parse error was reported"
 
       # Runs first so the hints are visible even when the gate below fails.
       - name: Advisory - cost and reliability hygiene (annotations only)

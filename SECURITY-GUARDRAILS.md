@@ -58,9 +58,9 @@ Scope: this removes the shared platform-tag namespace. The merge jobs still refe
 
 ## Conventions (not yet CI-enforced)
 
-No `actionlint`, `zizmor`, or `gitleaks` runs against this repo's own workflows today
-(the `actionlint`/`yq`/`awk` commands in `AGENTS.md` "Pre-merge checks" are a manual
-checklist, not a CI gate). The rules below are therefore review-enforced — run the
+`zizmor` (`reusable_zizmor.yml`) and ci-doctor (`reusable_ci_doctor.yml`) run on this
+repo's own PRs; `actionlint` and `gitleaks` do not (the `actionlint`/`yq`/`awk`
+commands in `AGENTS.md` "Pre-merge checks" are a manual checklist, not a CI gate). The rules below are therefore review-enforced — run the
 `AGENTS.md` pre-merge greps before every workflow change.
 
 ### Never interpolate untrusted `${{ … }}` inside a `run:` body
