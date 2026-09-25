@@ -447,6 +447,31 @@ echo "${HTTP_CODE:-404}"
                                                 'babylonlabs/app@' + self.DIGESTS['linux-amd64'],
                                                 'babylonlabs/app@' + self.DIGESTS['linux-arm64']])
 
+    def test_digest_artifacts_are_keyed_on_the_image_not_the_run_attempt(self):
+        """Two calls of this workflow in one run build different images
+        (aave-v4-bots, covenant-emulator and babylon-desk each call it twice), so
+        the artifact name has to carry the image. It must not carry the run
+        attempt, or re-running a failed merge job looks for artifacts the
+        still-green build jobs never re-uploaded."""
+        image = OUT % 'image-name'
+        for registry, merge_job in (('dockerhub', 'merge_dockerhub'), ('ecr', 'merge_ecr')):
+            upload = self.step('docker_build', name=f'Upload {"Docker Hub" if registry == "dockerhub" else "ECR"} platform digest')
+            download = self.step(merge_job, name='Download platform digests')
+            with self.subTest(registry=registry):
+                name = upload['with']['name']
+                self.assertIn(image, name, 'artifact name must distinguish the image')
+                self.assertIn('platform_pair', name, 'and the platform')
+                self.assertNotIn('run_attempt', name)
+                self.assertNotIn('run_attempt', download['with']['pattern'])
+                # A re-run of a build job re-uploads the same name.
+                self.assertTrue(upload['with']['overwrite'])
+                # The pattern must actually match what was uploaded.
+                self.assertEqual(download['with']['pattern'], f'digests-{registry}-{image}-*')
+                self.assertTrue(name.startswith(f'digests-{registry}-{image}-'))
+        # The two registries never collide with each other.
+        self.assertNotEqual(self.step('merge_dockerhub', name='Download platform digests')['with']['pattern'],
+                            self.step('merge_ecr', name='Download platform digests')['with']['pattern'])
+
     def test_merge_refuses_a_final_tag_that_already_exists(self):
         """#47: an existing final tag is never treated as success. ECR is
         immutable, Docker Hub is not, so both have to refuse it — and a registry
