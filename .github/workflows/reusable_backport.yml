@@ -27,6 +27,10 @@ on:
         description: 'Run backport'
         type: boolean
         default: true
+      timeout_minutes:
+        description: 'Job timeout in minutes. Raise it for backports to many branches.'
+        type: number
+        default: 10
 
 permissions:
   contents: write
@@ -36,7 +40,7 @@ jobs:
   backport:
     name: Backport
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: ${{ inputs.timeout_minutes }}
     # One expression, no ${{ }} wrapper: mixing ${{ inputs.run-backport }}
     # with bare text made the whole `if:` a non-empty string, which is always
     # true, so the merged-only guard below never applied (zizmor
