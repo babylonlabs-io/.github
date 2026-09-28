@@ -466,8 +466,22 @@ echo "${HTTP_CODE:-404}"
                 # A re-run of a build job re-uploads the same name.
                 self.assertTrue(upload['with']['overwrite'])
                 # The pattern must actually match what was uploaded.
-                self.assertEqual(download['with']['pattern'], f'digests-{registry}-{image}-*')
-                self.assertTrue(name.startswith(f'digests-{registry}-{image}-'))
+                self.assertEqual(download['with']['pattern'], f'digests-{registry}--{image}--*')
+                self.assertTrue(name.startswith(f'digests-{registry}--{image}--'))
+        # A download pattern must not prefix-match a SIBLING image published by
+        # the same run: vault-provers ships vault-provers-devnet and
+        # vault-provers-testnet together, so 'x-*' would swallow 'x-testnet-*'.
+        # '--' is safe because the validated name grammar,
+        # ^[a-z0-9]+([._-][a-z0-9]+)*$, never allows two separators in a row.
+        grammar = re.compile(r'^[a-z0-9]+([._-][a-z0-9]+)*$')
+        for nm in ('vault-provers', 'vault-provers-testnet', 'babylond', 'aave-bots-svc'):
+            self.assertRegex(nm, grammar, 'test fixture must be a legal image name')
+            self.assertNotIn('--', nm)
+        for registry in ('dockerhub', 'ecr'):
+            short = f'digests-{registry}--vault-provers--'          # the pattern's literal head
+            longer = f'digests-{registry}--vault-provers-testnet--linux-amd64'
+            self.assertFalse(longer.startswith(short),
+                             'sibling image must not match the shorter image\'s download pattern')
         # The two registries never collide with each other.
         self.assertNotEqual(self.step('merge_dockerhub', name='Download platform digests')['with']['pattern'],
                             self.step('merge_ecr', name='Download platform digests')['with']['pattern'])
