@@ -157,7 +157,10 @@ echo "${HTTP_CODE:-404}"
             bin_dir = directory / 'bin'
             bin_dir.mkdir()
             docker = bin_dir / 'docker'
-            docker.write_text('#!/bin/bash\nprintf "%s\\n" "$*" >> "$DOCKER_LOG"\n')
+            docker.write_text('#!/bin/bash\nprintf "%s\\n" "$*" >> "$DOCKER_LOG"\n'
+                              # Read-back after a manifest push: the registry answers with
+                              # whatever the test planted (a manifest list by default).
+                              'if [ "$1 $2 $3 $4" = "buildx imagetools inspect --raw" ]; then printf "%s" "$DOCKER_INSPECT_RAW"; fi\n')
             docker.chmod(0o755)
             for tool in tools:
                 (bin_dir / tool).symlink_to(self.tools[tool])
@@ -177,7 +180,10 @@ echo "${HTTP_CODE:-404}"
             github_env.touch()
             full_env = dict(PATH=str(bin_dir), GITHUB_OUTPUT=str(output), GITHUB_ENV=str(github_env),
                             LANG='C.UTF-8', LC_ALL='C.UTF-8', DOCKER_LOG=str(directory / 'docker.log'),
-                            RUNNER_TEMP=str(runner_temp))
+                            RUNNER_TEMP=str(runner_temp),
+                            # What the registry reports the tag resolving to after the push:
+                            # by default exactly the digests this run recorded.
+                            DOCKER_INSPECT_RAW=json.dumps({'manifests': [{'digest': d} for d in (digests or {}).values()]}))
             full_env.update(env)
             result = subprocess.run([self.bash, '--noprofile', '--norc', '-e', '-c', script],
                                     env=full_env, text=True, capture_output=True, cwd=cwd)
@@ -443,31 +449,87 @@ echo "${HTTP_CODE:-404}"
         result, _, _, docker_calls = self.run_script(step['run'], env, tools=('jq', 'cat', 'tr', 'echo'),
                                                     stubs=self.REGISTRY_STUBS, digests=self.DIGESTS)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertEqual(docker_calls.split(), ['buildx', 'imagetools', 'create', '-t', 'babylonlabs/app:v1.2.3',
-                                                'babylonlabs/app@' + self.DIGESTS['linux-amd64'],
-                                                'babylonlabs/app@' + self.DIGESTS['linux-arm64']])
+        create, readback = docker_calls.splitlines()
+        self.assertEqual(create.split(), ['buildx', 'imagetools', 'create', '-t', 'babylonlabs/app:v1.2.3',
+                                          'babylonlabs/app@' + self.DIGESTS['linux-amd64'],
+                                          'babylonlabs/app@' + self.DIGESTS['linux-arm64']])
+        self.assertEqual(readback.split(), ['buildx', 'imagetools', 'inspect', '--raw', 'babylonlabs/app:v1.2.3'])
 
-    def test_digest_artifacts_are_keyed_on_the_image_not_the_run_attempt(self):
-        """Two calls of this workflow in one run build different images
-        (aave-v4-bots, covenant-emulator and babylon-desk each call it twice), so
-        the artifact name has to carry the image. It must not carry the run
-        attempt, or re-running a failed merge job looks for artifacts the
-        still-green build jobs never re-uploaded."""
+    def test_dockerhub_merge_fails_when_the_tag_does_not_resolve_to_its_digests(self):
+        """Docker Hub tags are mutable and the absence check is not atomic with
+        the push, so after `imagetools create` the tag is read back and must
+        list exactly the digests this run recorded. A concurrent publisher
+        that won the race shows up as a different manifest, and the job must
+        fail rather than report a release it did not make. Same-repository
+        races are additionally serialized by the job's concurrency group."""
+        step = self.step('merge_dockerhub', name='Create manifest list and push')
+        job = self.jobs['merge_dockerhub']
+        self.assertEqual(job['concurrency']['cancel-in-progress'], False)
+        self.assertIn(OUT % 'image-name', job['concurrency']['group'])
+        self.assertIn(OUT % 'image-tag', job['concurrency']['group'])
+        matrix = json.dumps({'include': [{'platform': 'linux/amd64'}, {'platform': 'linux/arm64'}]})
+        base = dict(DOCKERHUB_REGISTRY='babylonlabs', IMAGE_NAME='app', IMAGE_TAG='v1.2.3',
+                    DOCKERHUB_USERNAME='u', DOCKERHUB_TOKEN='t', BUILD_MATRIX=matrix,
+                    DOCKER_METADATA_OUTPUT_JSON=json.dumps({'tags': ['babylonlabs/app:v1.2.3']}))
+        foreign = 'sha256:' + 'ee' * 32
+        cases = {
+            'overwritten by another publisher': {'manifests': [{'digest': foreign}, {'digest': self.DIGESTS['linux-arm64']}]},
+            'a platform is missing': {'manifests': [{'digest': self.DIGESTS['linux-amd64']}]},
+            'an extra platform was added': {'manifests': [{'digest': d} for d in self.DIGESTS.values()] + [{'digest': foreign}]},
+            'not a manifest list': {'schemaVersion': 2, 'config': {'digest': foreign}},
+            'empty answer': {},
+        }
+        for label, answer in cases.items():
+            with self.subTest(label):
+                env = dict(base, DOCKER_INSPECT_RAW=json.dumps(answer))
+                result, _, _, docker_calls = self.run_script(step['run'], env, tools=('jq', 'cat', 'tr', 'echo'),
+                                                            stubs=self.REGISTRY_STUBS, digests=self.DIGESTS)
+                self.assertNotEqual(result.returncode, 0, label)
+                self.assertIn('does not resolve to the digests this run published', result.stdout)
+                self.assertIn('imagetools create', docker_calls, 'the push itself happened before the read-back caught it')
+        # Order of the manifests must not matter.
+        reordered = {'manifests': [{'digest': self.DIGESTS['linux-arm64']}, {'digest': self.DIGESTS['linux-amd64']}]}
+        result, _, _, _ = self.run_script(step['run'], dict(base, DOCKER_INSPECT_RAW=json.dumps(reordered)),
+                                          tools=('jq', 'cat', 'tr', 'echo'), stubs=self.REGISTRY_STUBS, digests=self.DIGESTS)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_digest_artifacts_are_keyed_on_the_prefix_and_image_not_the_run_attempt(self):
+        """One caller run may invoke this workflow several times. Different
+        images (aave-v4-bots, covenant-emulator, babylon-desk each call it
+        twice) are told apart by the image name; matrix legs publishing the
+        SAME image under different tags (btc-vault default/test-utils,
+        vaults-load-test-framework) differ only in buildArtifactPrefix, so the
+        name has to carry both. It must not carry the run attempt, or
+        re-running a failed merge job looks for artifacts the still-green
+        build jobs never re-uploaded."""
         image = OUT % 'image-name'
+        prefix = '${{ inputs.buildArtifactPrefix }}'
         for registry, merge_job in (('dockerhub', 'merge_dockerhub'), ('ecr', 'merge_ecr')):
             upload = self.step('docker_build', name=f'Upload {"Docker Hub" if registry == "dockerhub" else "ECR"} platform digest')
             download = self.step(merge_job, name='Download platform digests')
             with self.subTest(registry=registry):
                 name = upload['with']['name']
                 self.assertIn(image, name, 'artifact name must distinguish the image')
+                self.assertIn(prefix, name, 'and the build artifact prefix')
                 self.assertIn('platform_pair', name, 'and the platform')
                 self.assertNotIn('run_attempt', name)
                 self.assertNotIn('run_attempt', download['with']['pattern'])
                 # A re-run of a build job re-uploads the same name.
                 self.assertTrue(upload['with']['overwrite'])
                 # The pattern must actually match what was uploaded.
-                self.assertEqual(download['with']['pattern'], f'digests-{registry}--{image}--*')
-                self.assertTrue(name.startswith(f'digests-{registry}--{image}--'))
+                self.assertEqual(download['with']['pattern'], f'digests-{registry}--{prefix}--{image}--*')
+                self.assertTrue(name.startswith(f'digests-{registry}--{prefix}--{image}--'))
+        # Two legs of one matrix, same image, different prefix: distinct names,
+        # and neither leg's download pattern matches the other's upload.
+        for registry in ('dockerhub', 'ecr'):
+            legs = {pre: f'digests-{registry}--{pre}--btc-vault--linux-amd64' for pre in ('default-', 'test-utils-')}
+            self.assertEqual(len(set(legs.values())), 2, 'matrix legs must not share an artifact name')
+            for pre, name in legs.items():
+                head = f'digests-{registry}--{pre}--btc-vault--'
+                self.assertTrue(name.startswith(head))
+                for other_pre, other in legs.items():
+                    if other_pre != pre:
+                        self.assertFalse(other.startswith(head), 'a leg must not download the other leg\'s digests')
         # A download pattern must not prefix-match a SIBLING image published by
         # the same run: vault-provers ships vault-provers-devnet and
         # vault-provers-testnet together, so 'x-*' would swallow 'x-testnet-*'.
@@ -485,6 +547,26 @@ echo "${HTTP_CODE:-404}"
         # The two registries never collide with each other.
         self.assertNotEqual(self.step('merge_dockerhub', name='Download platform digests')['with']['pattern'],
                             self.step('merge_ecr', name='Download platform digests')['with']['pattern'])
+
+    def test_build_artifact_prefix_cannot_carry_the_artifact_delimiter(self):
+        """The prefix is joined into the digest artifact name with '--'. A
+        prefix containing '--' could make one caller's download pattern match
+        another caller's upload, so prepare-metadata rejects it, along with
+        anything that is not tag-safe. Every prefix in use today passes."""
+        step = self.step('prepare-metadata', name='Validate build artifact prefix')
+        accepted = ('', 'ops-', 'testnet-', 'default-', 'test-utils-', 'bridge', 'discord-adapter', 'devnet', 'a.b_c')
+        rejected = ('a--b', '--', 'x/y', 'x y', 'x:y', 'x\ny', 'a' * 65)
+        for prefix in accepted:
+            with self.subTest(prefix=prefix, expect='accept'):
+                result = subprocess.run(['bash', '-c', step['run']], env=dict(BUILD_PREFIX=prefix, PATH=os.environ['PATH']),
+                                        capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        for prefix in rejected:
+            with self.subTest(prefix=repr(prefix), expect='reject'):
+                result = subprocess.run(['bash', '-c', step['run']], env=dict(BUILD_PREFIX=prefix, PATH=os.environ['PATH']),
+                                        capture_output=True, text=True)
+                self.assertNotEqual(result.returncode, 0, 'must reject ' + repr(prefix))
+                self.assertIn('buildArtifactPrefix', result.stdout + result.stderr)
 
     def test_merge_refuses_a_final_tag_that_already_exists(self):
         """#47: an existing final tag is never treated as success. ECR is
