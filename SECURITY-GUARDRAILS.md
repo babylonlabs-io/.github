@@ -24,7 +24,7 @@ Enforced by: `.github/workflows/reusable_check_pinned_actions.yml` (runs on ever
 Always: sign every commit with an SSH key in `vars.BABYLON_ALLOWED_SIGNERS` (`sk-ssh-ed25519`, FIDO2); the only exemption is Dependabot, gated on immutable user ID `49699333` + type `Bot`, not `github.actor`.
 Bad:  push an unsigned commit onto a PR branch, or check `github.actor == 'dependabot[bot]'`.
 Good: commit signed by your hardware key; bot exemption keyed on `github.event.pull_request.user.id`.
-Enforced by: `.github/workflows/reusable_authenticate_commits.yml` (runs on every PR via org ruleset; verifies signatures through the Commits API).
+Enforced by: `.github/workflows/reusable_authenticate_commits.yml` (runs on every PR via org ruleset; verifies signatures through the Commits API). In a merge queue (`merge_group`) it passes without verifying: the queue admits only PRs that passed it, and the queue's commits are made by GitHub.
 
 ### Never accept an existing ECR tag solely because it exists
 Always: fail publication if a target platform or release tag already exists, unless a future implementation verifies that its content came from the expected build. Lookup failures must fail closed; only an explicit `ImageNotFound` for the requested tag permits a push. Keep immutable tags immutable and use a fresh tag for retries.
