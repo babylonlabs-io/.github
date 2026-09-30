@@ -176,6 +176,9 @@ inside a `run:` step is on the step's own `if:` expression.
 - `pull_request` — safe for fork PRs (read-only token). Use for lint/test/sig.
 - `pull_request_target` — see above. Default: no.
 - `workflow_call` — primary trigger here.
+- `merge_group` — every workflow an org ruleset requires must have it. Without
+  it the check never reports on the merge-group commit, and the queue removes
+  the PR at its timeout.
 - `push` — avoid; downstream consumes these as reusable workflows.
 - `workflow_dispatch` — fine for ops; document inputs.
 
@@ -209,6 +212,9 @@ Dependabot is exempted via three independent signals (login, immutable user ID
 - Do not check `github.actor` — it changes when a human pushes onto a Dependabot
   branch. Use `github.event.pull_request.user.*`.
 - Do not widen the bot exemption without security review.
+- On `merge_group` the job passes without verifying: a PR enters the queue only
+  after the check passed on its head, and the queue's commits are made by
+  GitHub, so they would fail. Do not extend this skip to any other event.
 
 ## Banned anti-patterns
 

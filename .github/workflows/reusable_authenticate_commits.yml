@@ -4,6 +4,10 @@ on:
   pull_request:
     types: [opened, synchronize, reopened]
 
+  # Required checks must report on the merge-group commit, or the queue waits
+  # until its timeout and removes the PR.
+  merge_group:
+
   # Reusable workflow trigger for explicit callers
   workflow_call:
     inputs:
@@ -44,7 +48,17 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
+      # A PR enters the merge queue only after this check passed on its head,
+      # so the queue run does not verify the commits again. The queue's own
+      # commits are made by GitHub, not signed with an allowed key, and would
+      # fail. The other steps skip in the queue; the job must still run to
+      # report the required check.
+      - name: Skip in merge queue
+        if: github.event_name == 'merge_group'
+        run: echo "Merge queue run - commits were verified on the pull request."
+
       - name: Checkout repository
+        if: github.event_name != 'merge_group'
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2 https://github.com/actions/checkout/releases/tag/v6.0.2
         with:
           ref: ${{ inputs.head_sha || github.event.pull_request.head.sha }}
@@ -52,6 +66,7 @@ jobs:
           persist-credentials: false
 
       - name: Identify PR author
+        if: github.event_name != 'merge_group'
         id: pr-author
         env:
           PR_USER_LOGIN: ${{ github.event.pull_request.user.login }}
@@ -76,7 +91,7 @@ jobs:
           fi
 
       - name: Import allowed SSH keys
-        if: steps.pr-author.outputs.is_dependabot != 'true'
+        if: github.event_name != 'merge_group' && steps.pr-author.outputs.is_dependabot != 'true'
         env:
           ALLOWED_SIGNERS: ${{ vars.BABYLON_ALLOWED_SIGNERS }}
         run: |
@@ -90,7 +105,7 @@ jobs:
           git config --global gpg.ssh.allowedSignersFile ~/.ssh/allowed_signers
 
       - name: Validate commit signatures
-        if: steps.pr-author.outputs.is_dependabot != 'true'
+        if: github.event_name != 'merge_group' && steps.pr-author.outputs.is_dependabot != 'true'
         env:
           HEAD_SHA: ${{ inputs.head_sha || github.event.pull_request.head.sha }}
           BASE_SHA: ${{ inputs.base_sha || github.event.pull_request.base.sha }}
@@ -224,7 +239,7 @@ jobs:
           echo "All $commit_count commit(s) passed verification."
 
       - name: Verify Dependabot commit signatures (GPG)
-        if: steps.pr-author.outputs.is_dependabot == 'true'
+        if: github.event_name != 'merge_group' && steps.pr-author.outputs.is_dependabot == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}

@@ -4,6 +4,10 @@ on:
   pull_request:
     types: [opened, synchronize, reopened]
 
+  # Required checks must report on the merge-group commit, or the queue waits
+  # until its timeout and removes the PR.
+  merge_group:
+
   workflow_call:
 
 permissions: {}
