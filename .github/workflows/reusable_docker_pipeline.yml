@@ -106,6 +106,19 @@ on:
         type: boolean
         description: 'Disable ARM64 builds'
         default: false
+    # Declared so callers can pass these by name instead of `secrets: inherit`
+    # (zizmor secrets-inherit). Optional: callers that still inherit keep
+    # working, and an unset secret fails only the step that uses it.
+    secrets:
+      DOCKERHUB_USERNAME:
+        required: false
+        description: 'Docker Hub user that pushes the image (publish-dockerhub)'
+      DOCKERHUB_TOKEN:
+        required: false
+        description: 'Docker Hub token for DOCKERHUB_USERNAME (publish-dockerhub)'
+      TBV_DEPS_APP_PRIVATE_KEY:
+        required: false
+        description: 'Private key of the tbv-protocol-deps-ro GitHub App (private-repos-authentication / go-private-repos-authentication)'
 
 # For github OIDC authentication to AWS
 permissions:
