@@ -58,7 +58,7 @@ Scope: this removes the shared platform-tag namespace. The merge jobs still refe
 
 ## Conventions (not yet CI-enforced)
 
-`zizmor` (`reusable_zizmor.yml`) and ci-doctor (`reusable_ci_doctor.yml`) run on this
+`zizmor` (`reusable_zizmor.yml`) runs on this
 repo's own PRs; `actionlint` and `gitleaks` do not (the `actionlint`/`yq`/`awk`
 commands in `AGENTS.md` "Pre-merge checks" are a manual checklist, not a CI gate). The rules below are therefore review-enforced — run the
 `AGENTS.md` pre-merge greps before every workflow change.
