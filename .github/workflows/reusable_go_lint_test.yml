@@ -79,6 +79,13 @@ on:
         required: false
         type: number
         default: 60
+    # Declared so callers can pass it by name instead of `secrets: inherit`
+    # (zizmor secrets-inherit). Optional: callers that still inherit keep
+    # working, and only go-private-repos-authentication uses it.
+    secrets:
+      TBV_DEPS_APP_PRIVATE_KEY:
+        required: false
+        description: 'Private key of the tbv-protocol-deps-ro GitHub App (go-private-repos-authentication)'
 
 permissions: {}
 

@@ -134,8 +134,8 @@ Today's references:
   `PRIVATE_REPO_TOKEN` / `GO_PRIVATE_TOKEN`, **never** baked into image layers.
   There is no PAT fallback: a caller that enables `private-repos-authentication`
   or `go-private-repos-authentication` must be able to read both org values
-  (`secrets: inherit`), and every repository it lists must be in the App's
-  installation. Masked with `::add-mask::`.
+  and pass the key (`TBV_DEPS_APP_PRIVATE_KEY: ${{ secrets.TBV_DEPS_APP_PRIVATE_KEY }}`),
+  and every repository it lists must be in the App's installation. Masked with `::add-mask::`.
 - `reusable_go_lint_test.yml` (`go-private-repos-authentication`) mints the
   same App token and writes it into a git URL rewrite limited to
   `https://github.com/babylonlabs-io/` so `go get` resolves private modules —
@@ -146,9 +146,11 @@ Today's references:
 - `vars.AWS_ECR_{ACCOUNT,REGION,REGISTRY_ID}`, `vars.DOCKERHUB_REGISTRY_ID`,
   `vars.BABYLON_ALLOWED_SIGNERS` — non-secret config.
 
-Rules: `secrets: inherit` in callers only when caller is a babylonlabs-io repo and
-the called workflow needs them — prefer named secrets, never `inherit` in workflows
-that could be reused outside the org. Never `set -x` in a step touching a secret.
+Rules: callers pass secrets by name, never `secrets: inherit` (zizmor
+`secrets-inherit`, enforced by the org-required `reusable_zizmor`). Every secret a
+reusable workflow here reads is declared under `on.workflow_call.secrets`, so a
+caller can name it; a workflow that reads only `GITHUB_TOKEN` needs no `secrets:`
+block in the caller at all. Never `set -x` in a step touching a secret.
 Never `echo "$SECRET"` — use `echo "${#SECRET}"` to confirm presence. Never put a
 secret into `${{ ... }}` inside a `run:` body (see next).
 
