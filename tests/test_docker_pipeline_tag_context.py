@@ -53,8 +53,8 @@ SLASH_GIT_TAGS = ['covenant-signer/v0.3.0', 'circuits/v1.3', 'audit-fixes/sherlo
 BRANCH_REF_NAMES = ['main', 'release/v4.x', 'feat/foo', '123/merge',
                     'dependabot/go_modules/github.com/cosmos/cosmos-sdk-0.50.14', 'Feat/Foo']
 
-# Pairs the previous sanitizer (sed 's|[^A-Za-z0-9_.-]|-|g; s|^[.-]+||') mapped
-# to one tag. The first pair is the baby-auditor-infra-findings#121 example.
+# Pairs a sanitizer like sed 's|[^A-Za-z0-9_.-]|-|g; s|^[.-]+||' maps to one
+# tag. The first pair is the baby-auditor-infra-findings#121 example.
 LOSSY_PAIRS = [
     ('.release-a', 'release-a'),
     ('feat/a-b', 'feat-a/b'),
@@ -704,7 +704,7 @@ echo "${HTTP_CODE:-404}"
             (root / 'work' / 'repo-evil' / 'Dockerfile').write_text('FROM scratch\n')
             (workspace / 'prefix-link').symlink_to(root / 'work' / 'repo-evil')
             # Dockerfiles that are themselves symlinks: to a regular file outside
-            # the workspace (PR #90 review), to one inside it, and a dangling one.
+            # the workspace, to one inside it, and a dangling one.
             (workspace / 'Dockerfile.outside').symlink_to(outside / 'Dockerfile')
             (workspace / 'Dockerfile.passwd').symlink_to('/etc/passwd')
             (workspace / 'Dockerfile.inside').symlink_to('agent/Dockerfile')

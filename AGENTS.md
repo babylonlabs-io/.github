@@ -216,6 +216,21 @@ Dependabot is exempted via three independent signals (login, immutable user ID
   after the check passed on its head, and the queue's commits are made by
   GitHub, so they would fail. Do not extend this skip to any other event.
 
+## Comments
+
+- A comment explains the code as it is now: what it does when that is not
+  obvious, and why a non-obvious value or constraint exists.
+- No history in comments: no dates, incidents, PR, issue, or commit numbers,
+  "previously", "fixed", or who did what. That belongs in the commit message,
+  the PR description, and `CHANGELOG.md`.
+- Document only what a reader needs and cannot get from the code. Example:
+  every entry in an allowlist names who it is (`10.1.2.3/32  # Kiln VP egress`,
+  or an approved runner label and why it is approved); a pinned version says
+  why it is pinned beyond the required `# vX.Y.Z`; an exception (a skipped
+  event, an `if:` bypass) names the constraint it works around.
+- One or two lines. Do not restate the code.
+- When you change code, update or delete the comments it makes stale.
+
 ## Banned anti-patterns
 
 - Replacing a pinned 40-char SHA with `@v4` or `@main` "for readability".

@@ -27,8 +27,7 @@ on:
         description: 'Run integration tests'
         type: boolean
         default: false
-      # No effect. The Docker Hub login it was meant to enable never ran and is
-      # removed (see CHANGELOG); kept so callers that set it keep working.
+      # No effect; kept so callers that set it keep working.
       integration-tests-docker-auth:
         description: 'No effect (the Docker Hub login it enabled never ran and was removed); kept for existing callers'
         type: boolean
