@@ -74,6 +74,11 @@ on:
         required: false
         type: string
         default: testdata.json
+      testdata-sha256:
+        description: 'SHA-256 (64 hex characters) of the test data file. Required when testdata-url is set: the download is verified against it, it keys the cache, and a cached file is verified again before the tests run.'
+        required: false
+        type: string
+        default: ''
       timeout_minutes:
         description: 'Job timeout in minutes, for every job (like reusable_docker_pipeline). Raise it for unusually long test suites.'
         required: false
@@ -207,6 +212,23 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2 https://github.com/actions/checkout/releases/tag/v6.0.2
+      - name: Require a test data checksum
+        if: ${{ inputs.testdata-url != '' }}
+        env:
+          TESTDATA_SHA256: ${{ inputs.testdata-sha256 }}
+          TESTDATA_PATH: ${{ inputs.testdata-path }}
+        run: |
+          set -euo pipefail
+          LC_ALL=C
+          if [[ ! "$TESTDATA_SHA256" =~ ^[0-9a-f]{64}$ ]]; then
+            echo "::error::testdata-url is set, so testdata-sha256 must be the lowercase 64-hex SHA-256 of the file; the URL alone does not identify its content."
+            exit 1
+          fi
+          if [[ -z "$TESTDATA_PATH" || "$TESTDATA_PATH" == /* || "$TESTDATA_PATH" == *..* || "$TESTDATA_PATH" == *[[:cntrl:]]* ]]; then
+            echo "::error::testdata-path must be a relative path inside the checkout"
+            exit 1
+          fi
+
       # Restore cache if file already cached
       - name: Restore test data cache
         if: ${{ inputs.testdata-url != '' }}
@@ -214,7 +236,7 @@ jobs:
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0 https://github.com/actions/cache/releases/tag/v4.3.0
         with:
           path: ${{ inputs.testdata-path }}
-          key: testdata-${{ inputs.testdata-url }}-${{ inputs.testdata-path }}
+          key: testdata-sha256-${{ inputs.testdata-sha256 }}-${{ inputs.testdata-path }}
 
       # Download file if cache miss
       - name: Download test data (if cache miss)
@@ -223,9 +245,23 @@ jobs:
           TESTDATA_URL: ${{ inputs.testdata-url }}
           TESTDATA_PATH: ${{ inputs.testdata-path }}
         run: |
+          set -euo pipefail
           echo "Cache miss — downloading test data from $TESTDATA_URL to $TESTDATA_PATH..."
           mkdir -p "$(dirname "$TESTDATA_PATH")"
-          curl -L -o "$TESTDATA_PATH" "$TESTDATA_URL"
+          curl -fsSL --retry 3 -o "$TESTDATA_PATH" "$TESTDATA_URL"
+
+      - name: Verify test data checksum
+        if: ${{ inputs.testdata-url != '' }}
+        env:
+          TESTDATA_SHA256: ${{ inputs.testdata-sha256 }}
+          TESTDATA_PATH: ${{ inputs.testdata-path }}
+        run: |
+          set -euo pipefail
+          if ! echo "${TESTDATA_SHA256}  ${TESTDATA_PATH}" | sha256sum -c --strict -; then
+            rm -f -- "$TESTDATA_PATH"
+            echo "::error::$TESTDATA_PATH does not match testdata-sha256; the file was removed and the tests will not run against it."
+            exit 1
+          fi
 
       - name: Set up Go
         uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0 https://github.com/actions/setup-go/releases/tag/v5.6.0
