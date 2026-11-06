@@ -90,6 +90,66 @@ jobs:
             echo "PR author: login=${PR_USER_LOGIN:-unknown}, ID=${PR_USER_ID:-unknown}, Type=${PR_USER_TYPE:-unknown}"
           fi
 
+      - name: Resolve the commit range
+        if: github.event_name != 'merge_group'
+        id: range
+        env:
+          INPUT_HEAD_SHA: ${{ inputs.head_sha }}
+          INPUT_BASE_SHA: ${{ inputs.base_sha }}
+          EVENT_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          EVENT_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+
+          fail() {
+            echo "::error::$1"
+            {
+              echo "## 🔐 Commit Signature Verification"
+              echo ""
+              echo "❌ **$1**"
+              echo ""
+              echo "<!-- babylon-commit-auth -->"
+            } | tee -a "$GITHUB_STEP_SUMMARY" > /tmp/pr-comment-body.md
+            exit 1
+          }
+
+          bind() {
+            local name="$1" input="$2" event="$3"
+            if [ -n "$event" ]; then
+              if [ -n "$input" ] && [ "$input" != "$event" ]; then
+                fail "${name} input '${input}' does not match the pull request's ${name} '${event}'. The verified range is bound to the pull request event."
+              fi
+              RESOLVED="$event"
+            else
+              RESOLVED="$input"
+            fi
+            if ! [[ "$RESOLVED" =~ ^[a-fA-F0-9]{40}$ ]]; then
+              fail "Invalid ${name}: '${RESOLVED}'. Pass a 40-character commit SHA or run from a pull request event."
+            fi
+          }
+
+          bind head_sha "$INPUT_HEAD_SHA" "$EVENT_HEAD_SHA"
+          head_sha="$RESOLVED"
+          bind base_sha "$INPUT_BASE_SHA" "$EVENT_BASE_SHA"
+          base_sha="$RESOLVED"
+
+          if [ "$head_sha" = "$base_sha" ]; then
+            fail "head_sha and base_sha are the same commit (${head_sha:0:12}); there is nothing to verify, refusing to pass."
+          fi
+          if ! commits=$(git rev-list --end-of-options "${base_sha}".."${head_sha}"); then
+            fail "Could not list the commits in ${base_sha:0:12}..${head_sha:0:12}."
+          fi
+          if [ -z "$commits" ]; then
+            fail "No commits found in ${base_sha:0:12}..${head_sha:0:12}; zero commits checked is a failure, not a pass."
+          fi
+          commit_count=$(echo "$commits" | wc -l | tr -d ' ')
+          echo "Range ${base_sha:0:12}..${head_sha:0:12} has ${commit_count} commit(s) to verify."
+          {
+            echo "head_sha=$head_sha"
+            echo "base_sha=$base_sha"
+            echo "commit_count=$commit_count"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Import allowed SSH keys
         if: github.event_name != 'merge_group' && steps.pr-author.outputs.is_dependabot != 'true'
         env:
@@ -107,8 +167,8 @@ jobs:
       - name: Validate commit signatures
         if: github.event_name != 'merge_group' && steps.pr-author.outputs.is_dependabot != 'true'
         env:
-          HEAD_SHA: ${{ inputs.head_sha || github.event.pull_request.head.sha }}
-          BASE_SHA: ${{ inputs.base_sha || github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ steps.range.outputs.head_sha }}
+          BASE_SHA: ${{ steps.range.outputs.base_sha }}
           ENFORCE_KEY_TYPE: ${{ github.event_name == 'pull_request' || inputs.enforce_key_type != false }}
         run: |
           set -euo pipefail
@@ -123,17 +183,10 @@ jobs:
           validate_sha "$HEAD_SHA"
           validate_sha "$BASE_SHA"
 
-          commits=$(git rev-list --end-of-options "${BASE_SHA}".."${HEAD_SHA}" || true)
+          commits=$(git rev-list --end-of-options "${BASE_SHA}".."${HEAD_SHA}")
           if [ -z "$commits" ]; then
-            echo "No commits to verify in range ${BASE_SHA:0:12}..${HEAD_SHA:0:12}."
-            {
-              echo "## 🔐 Commit Signature Verification"
-              echo ""
-              echo "No commits found in range \`${BASE_SHA:0:12}\`..\`${HEAD_SHA:0:12}\`."
-            } | tee -a "$GITHUB_STEP_SUMMARY" > /tmp/pr-comment-body.md
-            echo "" >> /tmp/pr-comment-body.md
-            echo "<!-- babylon-commit-auth -->" >> /tmp/pr-comment-body.md
-            exit 0
+            echo "::error::No commits found in range ${BASE_SHA:0:12}..${HEAD_SHA:0:12}; refusing to pass without verifying any commit."
+            exit 1
           fi
           commit_count=$(echo "$commits" | wc -l | tr -d ' ')
           echo "Verifying $commit_count commit(s)..."
@@ -243,8 +296,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
-          HEAD_SHA: ${{ inputs.head_sha || github.event.pull_request.head.sha }}
-          BASE_SHA: ${{ inputs.base_sha || github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ steps.range.outputs.head_sha }}
+          BASE_SHA: ${{ steps.range.outputs.base_sha }}
         run: |
           set -euo pipefail
 
@@ -258,17 +311,10 @@ jobs:
           validate_sha "$HEAD_SHA"
           validate_sha "$BASE_SHA"
 
-          commits=$(git rev-list --end-of-options "${BASE_SHA}".."${HEAD_SHA}" || true)
+          commits=$(git rev-list --end-of-options "${BASE_SHA}".."${HEAD_SHA}")
           if [ -z "$commits" ]; then
-            echo "No commits to verify in range ${BASE_SHA:0:12}..${HEAD_SHA:0:12}."
-            {
-              echo "## 🔐 Commit Signature Verification (Dependabot)"
-              echo ""
-              echo "No commits found in range \`${BASE_SHA:0:12}\`..\`${HEAD_SHA:0:12}\`."
-            } | tee -a "$GITHUB_STEP_SUMMARY" > /tmp/pr-comment-body.md
-            echo "" >> /tmp/pr-comment-body.md
-            echo "<!-- babylon-commit-auth -->" >> /tmp/pr-comment-body.md
-            exit 0
+            echo "::error::No commits found in range ${BASE_SHA:0:12}..${HEAD_SHA:0:12}; refusing to pass without verifying any commit."
+            exit 1
           fi
 
           commit_count=$(echo "$commits" | wc -l | tr -d ' ')

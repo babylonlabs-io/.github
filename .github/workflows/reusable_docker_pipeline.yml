@@ -205,6 +205,28 @@ jobs:
             exit 1
           fi
 
+      - name: Require image scanning for publication
+        env:
+          PUBLISH: ${{ inputs.publish }}
+          PUSH_TO_DOCKERHUB: ${{ inputs.push_to_dockerhub }}
+          PUSH_TO_ECR: ${{ inputs.push_to_ecr }}
+          DOCKER_SCAN: ${{ inputs.docker_scan }}
+        run: |
+          set -euo pipefail
+          if [ "$PUBLISH" != "true" ]; then
+            echo "Not publishing; scan policy inputs apply as given."
+            exit 0
+          fi
+          if [ "$PUSH_TO_DOCKERHUB" != "true" ] && [ "$PUSH_TO_ECR" != "true" ]; then
+            echo "publish is true but no registry is selected; nothing will be pushed."
+            exit 0
+          fi
+          if [ "$DOCKER_SCAN" != "true" ]; then
+            echo "::error::publish requires docker_scan: true. An image is published only after the Trivy vulnerability and secret scans of this run passed; trivy_nofail and secret_nofail do not apply to publishing runs."
+            exit 1
+          fi
+          echo "Publishing run: every Trivy scan must pass before any registry push."
+
       # Registry credentials follow the runner label, so callers may only pick
       # from the approved ephemeral GitHub-hosted labels below. Self-hosted
       # pools (arc-runner-set, arc-runner-set-dind, gpu, localnet) are not
@@ -847,6 +869,41 @@ jobs:
       # ===========================================
       # PUSH TO REGISTRIES (only after scans pass)
       # ===========================================
+
+      - name: Require passing scans before publishing
+        if: inputs.publish && (inputs.push_to_dockerhub || inputs.push_to_ecr)
+        env:
+          DOCKER_SCAN: ${{ inputs.docker_scan }}
+          PLATFORM: ${{ matrix.platform }}
+          FS_SCAN_OUTCOME: ${{ steps.fs-scan.outcome }}
+          FS_SECRET_OUTCOME: ${{ steps.fs-secret-scan.outcome }}
+          IMAGE_SCAN_OUTCOME: ${{ steps.image-scan.outcome }}
+          IMAGE_SECRET_OUTCOME: ${{ steps.image-secret-scan.outcome }}
+        run: |
+          set -euo pipefail
+          if [ "$DOCKER_SCAN" != "true" ]; then
+            echo "::error::publish requires docker_scan: true; refusing to push an unscanned image."
+            exit 1
+          fi
+          failed=0
+          require() {
+            local scan="$1" outcome="$2"
+            if [ "$outcome" = "success" ]; then
+              echo "$scan: passed"
+            else
+              echo "::error::$scan did not pass (outcome: ${outcome:-none}). Publication requires every scan of this run to succeed; trivy_nofail and secret_nofail do not apply when publish is true. Fix the finding, or allow-list it in .trivyignore / secret_config."
+              failed=1
+            fi
+          }
+          require "Trivy image scan" "$IMAGE_SCAN_OUTCOME"
+          require "Trivy image secret scan" "$IMAGE_SECRET_OUTCOME"
+          if [ "$PLATFORM" = "linux/amd64" ]; then
+            require "Trivy filesystem scan" "$FS_SCAN_OUTCOME"
+            require "Trivy filesystem secret scan" "$FS_SECRET_OUTCOME"
+          fi
+          if [ "$failed" -ne 0 ]; then
+            exit 1
+          fi
 
       - name: Login to Docker Hub
         if: inputs.publish && inputs.push_to_dockerhub
