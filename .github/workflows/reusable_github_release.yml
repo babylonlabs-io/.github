@@ -156,7 +156,7 @@ jobs:
               asset_count=$(jq -r '.assets | length' <<< "$API_BODY")
               target=$(jq -r '.target_commitish // ""' <<< "$API_BODY")
               if [ "$asset_count" -gt 0 ] && [ "$target" != "$GIT_SHA" ]; then
-                echo "::error::release $TAG already carries $asset_count asset(s) recorded for '$target', not for $GIT_SHA. Refusing to put new notes over assets of another build: publish the notes before the asset workflow (GoReleaser records the default branch, not the commit), or delete the release and re-run both."
+                echo "::error::release $TAG already carries $asset_count asset(s) recorded for '$target', not for $GIT_SHA. Refusing to put new notes over assets of another build: GoReleaser records the default branch unless the caller's GoReleaser config sets release.target_commitish to '{{ .FullCommit }}'. Set it, then delete the release and re-run both."
                 exit 1
               fi
               echo "Release $TAG exists with $asset_count asset(s); notes will be updated."
