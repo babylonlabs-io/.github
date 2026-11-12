@@ -47,11 +47,221 @@ jobs:
   release:
     permissions:
       contents: write
+    concurrency:
+      group: reusable-github-release--${{ github.repository }}
+      cancel-in-progress: false
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2 https://github.com/actions/checkout/releases/tag/v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Verify the tag names this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ inputs.tag }}
+          GIT_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          LC_ALL=C
+          if [[ ! "$TAG" =~ ^[A-Za-z0-9._+][A-Za-z0-9._/+-]*$ ]] || ! git check-ref-format "refs/tags/$TAG"; then
+            echo "::error::tag '$TAG' is not a valid tag name (allowed: A-Z a-z 0-9 . _ / + -, not starting with - or /)"
+            exit 1
+          fi
+          if [[ ! "$GIT_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::github.sha is not usable"
+            exit 1
+          fi
+
+          api_get() {
+            local response
+            response=$(gh api --include "$1" 2>/dev/null || true)
+            API_STATUS=$(awk 'NR == 1 { print $2 }' <<< "$response")
+            API_BODY=$(awk 'body { print } /^\r?$/ { body = 1 }' <<< "$response")
+            if [[ ! "$API_STATUS" =~ ^[0-9]{3}$ ]]; then
+              echo "::error::no HTTP response from $1"
+              exit 1
+            fi
+          }
+
+          api_get "repos/$REPO/git/ref/tags/$TAG"
+          if [ "$API_STATUS" = "404" ]; then
+            echo "::error::tag $TAG does not exist in $REPO. This workflow publishes notes for an existing tag and never creates one; push the tag first."
+            exit 1
+          elif [ "$API_STATUS" != "200" ]; then
+            echo "::error::could not resolve tag $TAG (HTTP $API_STATUS). Refusing to publish."
+            exit 1
+          fi
+          if [ "$(jq -r '.ref' <<< "$API_BODY")" != "refs/tags/$TAG" ]; then
+            echo "::error::GitHub returned a different ref than refs/tags/$TAG. Refusing to publish."
+            exit 1
+          fi
+          object_type=$(jq -r '.object.type' <<< "$API_BODY")
+          object_sha=$(jq -r '.object.sha' <<< "$API_BODY")
+          peeled=0
+          while [ "$object_type" = "tag" ]; do
+            peeled=$((peeled + 1))
+            if [ "$peeled" -gt 5 ]; then
+              echo "::error::tag $TAG is nested more than 5 levels deep. Refusing to publish."
+              exit 1
+            fi
+            api_get "repos/$REPO/git/tags/$object_sha"
+            if [ "$API_STATUS" != "200" ]; then
+              echo "::error::could not peel tag object $object_sha (HTTP $API_STATUS). Refusing to publish."
+              exit 1
+            fi
+            object_type=$(jq -r '.object.type' <<< "$API_BODY")
+            object_sha=$(jq -r '.object.sha' <<< "$API_BODY")
+          done
+          if [ "$object_type" != "commit" ] || [[ ! "$object_sha" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::tag $TAG does not resolve to a commit (type '$object_type'). Refusing to publish."
+            exit 1
+          fi
+          head_sha=$(git rev-parse --verify HEAD)
+          if [ "$object_sha" != "$GIT_SHA" ] || [ "$head_sha" != "$GIT_SHA" ]; then
+            echo "::error::tag $TAG names commit $object_sha, but this run describes $GIT_SHA (checked out $head_sha). Start the release workflow from the tag itself (\"Use workflow from\" -> Tags -> $TAG) so the notes and build instructions match the code the tag names."
+            exit 1
+          fi
+          echo "tag $TAG -> $object_sha matches this run's commit."
+
+      - name: Check the existing release and decide the latest pointer
+        id: policy
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ inputs.tag }}
+          PRERELEASE: ${{ inputs.prerelease }}
+          GIT_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          LC_ALL=C
+
+          api_get() {
+            local response
+            response=$(gh api --include "$1" 2>/dev/null || true)
+            API_STATUS=$(awk 'NR == 1 { print $2 }' <<< "$response")
+            API_BODY=$(awk 'body { print } /^\r?$/ { body = 1 }' <<< "$response")
+            if [[ ! "$API_STATUS" =~ ^[0-9]{3}$ ]]; then
+              echo "::error::no HTTP response from $1"
+              exit 1
+            fi
+          }
+
+          api_get "repos/$REPO/releases/tags/$TAG"
+          case "$API_STATUS" in
+            404)
+              echo "No release exists for $TAG yet."
+              ;;
+            200)
+              asset_count=$(jq -r '.assets | length' <<< "$API_BODY")
+              target=$(jq -r '.target_commitish // ""' <<< "$API_BODY")
+              if [ "$asset_count" -gt 0 ] && [ "$target" != "$GIT_SHA" ]; then
+                echo "::error::release $TAG already carries $asset_count asset(s) recorded for '$target', not for $GIT_SHA. Refusing to put new notes over assets of another build: GoReleaser records the default branch unless the caller's GoReleaser config sets release.target_commitish to '{{ .FullCommit }}'. Set it, then delete the release and re-run both."
+                exit 1
+              fi
+              echo "Release $TAG exists with $asset_count asset(s); notes will be updated."
+              ;;
+            *)
+              echo "::error::could not read the existing release for $TAG (HTTP $API_STATUS). Refusing to publish."
+              exit 1
+              ;;
+          esac
+
+          semver_parse() {
+            local value="$1"
+            local grammar='^(.*/)?v?(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-([0-9A-Za-z.-]+))?(\+[0-9A-Za-z.-]+)?$'
+            [[ "$value" =~ $grammar ]] || return 1
+            SEMVER_PREFIX="${BASH_REMATCH[1]}"
+            SEMVER_MAJOR="${BASH_REMATCH[2]}"
+            SEMVER_MINOR="${BASH_REMATCH[3]}"
+            SEMVER_PATCH="${BASH_REMATCH[4]}"
+            SEMVER_PRE="${BASH_REMATCH[6]}"
+          }
+
+          ident_cmp() {
+            local a="$1" b="$2"
+            if [[ "$a" =~ ^[0-9]+$ && "$b" =~ ^[0-9]+$ ]]; then
+              if [ "$a" -lt "$b" ]; then echo -1; elif [ "$a" -gt "$b" ]; then echo 1; else echo 0; fi
+            elif [[ "$a" =~ ^[0-9]+$ ]]; then
+              echo -1
+            elif [[ "$b" =~ ^[0-9]+$ ]]; then
+              echo 1
+            elif [[ "$a" < "$b" ]]; then
+              echo -1
+            elif [[ "$a" > "$b" ]]; then
+              echo 1
+            else
+              echo 0
+            fi
+          }
+
+          prerelease_cmp() {
+            local a="$1" b="$2" i r
+            local -a ia ib
+            if [ -z "$a" ] && [ -z "$b" ]; then echo 0; return; fi
+            if [ -z "$a" ]; then echo 1; return; fi
+            if [ -z "$b" ]; then echo -1; return; fi
+            IFS=. read -r -a ia <<< "$a"
+            IFS=. read -r -a ib <<< "$b"
+            for ((i = 0; i < ${#ia[@]} && i < ${#ib[@]}; i++)); do
+              r=$(ident_cmp "${ia[$i]}" "${ib[$i]}")
+              if [ "$r" != "0" ]; then echo "$r"; return; fi
+            done
+            if [ "${#ia[@]}" -lt "${#ib[@]}" ]; then echo -1; elif [ "${#ia[@]}" -gt "${#ib[@]}" ]; then echo 1; else echo 0; fi
+          }
+
+          make_latest=false
+          if [ "$PRERELEASE" = "true" ]; then
+            echo "Prerelease: the latest pointer stays where it is."
+          elif ! semver_parse "$TAG"; then
+            echo "Tag $TAG is not <prefix/>vMAJOR.MINOR.PATCH[-pre]; the latest pointer stays where it is."
+          else
+            new_prefix="$SEMVER_PREFIX" new_major="$SEMVER_MAJOR" new_minor="$SEMVER_MINOR" new_patch="$SEMVER_PATCH" new_pre="$SEMVER_PRE"
+            api_get "repos/$REPO/releases/latest"
+            case "$API_STATUS" in
+              404)
+                echo "No stable release yet; $TAG becomes latest."
+                make_latest=true
+                ;;
+              200)
+                latest_tag=$(jq -r '.tag_name' <<< "$API_BODY")
+                if [ "$latest_tag" = "$TAG" ]; then
+                  echo "$TAG is already the latest release."
+                  make_latest=true
+                elif ! semver_parse "$latest_tag"; then
+                  echo "Current latest release $latest_tag is not semver; the latest pointer stays where it is."
+                elif [ "$SEMVER_PREFIX" != "$new_prefix" ]; then
+                  echo "Current latest release $latest_tag has another tag prefix; the latest pointer stays where it is."
+                else
+                  cmp=0
+                  if [ "$new_major" -ne "$SEMVER_MAJOR" ]; then
+                    [ "$new_major" -gt "$SEMVER_MAJOR" ] && cmp=1 || cmp=-1
+                  elif [ "$new_minor" -ne "$SEMVER_MINOR" ]; then
+                    [ "$new_minor" -gt "$SEMVER_MINOR" ] && cmp=1 || cmp=-1
+                  elif [ "$new_patch" -ne "$SEMVER_PATCH" ]; then
+                    [ "$new_patch" -gt "$SEMVER_PATCH" ] && cmp=1 || cmp=-1
+                  else
+                    cmp=$(prerelease_cmp "$new_pre" "$SEMVER_PRE")
+                  fi
+                  if [ "$cmp" -gt 0 ]; then
+                    echo "$TAG is newer than the current latest release $latest_tag; it becomes latest."
+                    make_latest=true
+                  else
+                    echo "$TAG is not newer than the current latest release $latest_tag; the latest pointer stays where it is."
+                  fi
+                fi
+                ;;
+              *)
+                echo "::error::could not read the latest release (HTTP $API_STATUS). Refusing to publish."
+                exit 1
+                ;;
+            esac
+          fi
+          echo "make_latest=$make_latest" >> "$GITHUB_OUTPUT"
+
       - name: Generate base release notes
         env:
           DESCRIPTION: ${{ inputs.description }}
@@ -135,8 +345,10 @@ jobs:
         with:
           tag_name: ${{ inputs.tag }}
           name: ${{ inputs.tag }}
+          target_commitish: ${{ github.sha }}
           body_path: release_notes.md
           draft: false
           prerelease: ${{ inputs.prerelease }}
+          make_latest: ${{ steps.policy.outputs.make_latest }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

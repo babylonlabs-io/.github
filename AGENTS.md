@@ -36,7 +36,7 @@ supply-chain change.** Rules below derive from real fixes here (PRs #56, #67, #7
     reusable_changelog_reminder.yml
     reusable_check_pinned_actions.yml   # the SHA-pin enforcer; do NOT weaken
     reusable_docker_pipeline.yml        # build + Trivy + Hadolint + push (OIDC)
-    test_ecr_tag_collisions.yml          # PR regression tests (tests/): ECR publication, runner inputs, image tag / build context validation, Docker credential cleanup
+    test_ecr_tag_collisions.yml          # PR regression tests (tests/): ECR publication, runner inputs, image tag / build context validation, Docker credential cleanup, scan gate
     reusable_github_release.yml
     reusable_go_lint_test.yml
     reusable_go_releaser.yml
@@ -212,6 +212,10 @@ Dependabot is exempted via three independent signals (login, immutable user ID
 - Do not check `github.actor` — it changes when a human pushes onto a Dependabot
   branch. Use `github.event.pull_request.user.*`.
 - Do not widen the bot exemption without security review.
+- The range is resolved once (`Resolve the commit range`): on a pull request
+  event `head_sha`/`base_sha` inputs must equal the event's SHAs, and an empty
+  range (or a range git cannot list) fails. Zero commits checked is never a
+  pass (baby-auditor-infra-findings#163).
 - On `merge_group` the job passes without verifying: a PR enters the queue only
   after the check passed on its head, and the queue's commits are made by
   GitHub, so they would fail. Do not extend this skip to any other event.
@@ -288,7 +292,7 @@ CI: `reusable_check_pinned_actions.yml` runs on PR and gates SHA-pin rules.
 becomes an org-wide required check once its ruleset is active.
 `test_ecr_tag_collisions.yml` runs everything under `tests/` (ECR publication,
 runner-label validation, image tag and build context validation, Docker
-credential cleanup) on PRs changing the Docker
+credential cleanup, the publish scan gate) on PRs changing the Docker
 publication workflow, the test workflow, or tests.
 
 When editing the Docker pipeline, also run `python3 -m unittest discover -s tests -v`
@@ -304,7 +308,10 @@ under the final tag — see "Never publish a per-platform image under a name a c
 can select" before touching the push or merge steps or adding a matrix platform.
 Preserve the fail-closed tag lookup and immutable-tag
 collision rules in `SECURITY-GUARDRAILS.md`; rerun success needs verification of
-expected build content, not just a tag-existence check.
+expected build content, not just a tag-existence check. A publishing run pushes
+only after every Trivy scan of the leg passed — see "Never publish an image whose
+scans did not pass" before touching the scan steps, the gate or the push
+conditions.
 
 ## Change checklist
 
